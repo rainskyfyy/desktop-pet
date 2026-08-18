@@ -1,0 +1,21 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+*.exe
+
+# electron-builder 缓存
+.cache/
+
+# 日志
+*.log
+
+# AI 辅助数据（本地记忆与凭证，不应提交）
+.codebuddy/
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

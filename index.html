@@ -1,0 +1,2349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>罗小黑 - 桌面宠物</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+            overflow: hidden;
+            background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 50%, #98D8C8 100%);
+            min-height: 100vh;
+        }
+
+        /* Electron 透明窗口：覆盖 body 背景 */
+        html.electron body { background: transparent !important; }
+
+        #gameCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        .toolbar {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-width: 95vw;
+        }
+        
+        .toolbar button {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 8px 12px;
+            border: none;
+            background: linear-gradient(135deg, #f5f5f5, #e8e8e8);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 10px;
+            color: #333;
+            min-width: 50px;
+        }
+        
+        .toolbar button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            background: linear-gradient(135deg, #fff, #f0f0f0);
+        }
+        
+        .toolbar button:active {
+            transform: translateY(0);
+        }
+        
+        .toolbar button .icon {
+            font-size: 20px;
+        }
+        
+        .toolbar button .label {
+            font-size: 10px;
+            color: #666;
+        }
+        
+        .toolbar button.active {
+            background: linear-gradient(135deg, #e0ffe0, #c8f5c8);
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);
+        }
+        
+        /* 死亡状态：禁用所有按钮，仅重置可点击 */
+        body.dead .toolbar button:not(#resetBtn) {
+            opacity: 0.35;
+            pointer-events: none;
+            cursor: not-allowed;
+            filter: grayscale(0.6);
+        }
+        body.dead .toolbar button#resetBtn {
+            background: linear-gradient(135deg, #ffe0e0, #ffc8c8);
+            animation: deadResetPulse 1.2s ease-in-out infinite;
+        }
+        @keyframes deadResetPulse {
+            0%, 100% { box-shadow: 0 0 6px rgba(244,67,54,0.3); }
+            50% { box-shadow: 0 0 18px rgba(244,67,54,0.7); }
+        }
+
+        /* 重置确认态 */
+        .toolbar button#resetBtn.resetting {
+            background: linear-gradient(135deg, #ff4444, #e53935) !important;
+            color: #fff !important;
+            animation: resetShake 0.5s ease-in-out infinite !important;
+        }
+        .toolbar button#resetBtn.resetting .icon,
+        .toolbar button#resetBtn.resetting .label {
+            color: #fff !important;
+        }
+        @keyframes resetShake {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.06); }
+        }
+
+        /* 穿透模式按钮 - 激活态高亮 */
+        .toolbar button#passThroughBtn.active {
+            background: linear-gradient(135deg, #66bb6a, #43a047) !important;
+            color: #fff !important;
+        }
+        .toolbar button#passThroughBtn.active .icon,
+        .toolbar button#passThroughBtn.active .label {
+            color: #fff !important;
+        }
+
+        .tooltip {
+            position: fixed;
+            display: none;
+            z-index: 1000;
+            pointer-events: none;
+            max-width: 240px;
+            padding: 8px 12px;
+            border-radius: 10px;
+            background: rgba(40, 44, 52, 0.95);
+            color: #fff;
+            font-size: 13px;
+            line-height: 1.5;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            white-space: normal;
+            transform: translate(-50%, -100%);
+        }
+
+        .tooltip .tt-effect {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .tooltip .tt-cost {
+            display: block;
+            font-weight: bold;
+        }
+
+        .tooltip .tt-cost.cost-pay {
+            color: #ffb74d;
+        }
+
+        .tooltip .tt-cost.cost-gain {
+            color: #81c784;
+        }
+
+        .tooltip .tt-cost.cost-free {
+            color: #b0bec5;
+        }
+
+        .status-bar {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            z-index: 100;
+            min-width: 180px;
+        }
+        
+        .status-bar h3 {
+            font-size: 14px;
+            margin-bottom: 12px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .status-item .icon {
+            font-size: 16px;
+            width: 24px;
+            text-align: center;
+        }
+        
+        .status-item .bar-container {
+            flex: 1;
+            height: 12px;
+            background: #e0e0e0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        .status-item .bar {
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.3s, background 0.3s;
+        }
+        
+        .status-item .value {
+            font-size: 10px;
+            color: #666;
+            width: 32px;
+            text-align: right;
+        }
+
+        .sick-badge {
+            margin-left: 4px;
+            padding: 1px 6px;
+            font-size: 10px;
+            font-weight: bold;
+            color: #fff;
+            background: #e53935;
+            border-radius: 8px;
+            white-space: nowrap;
+            animation: sickPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes sickPulse {
+            0%,100% { opacity:1; }
+            50% { opacity:0.5; }
+        }
+        
+        .level-display {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 16px;
+            box-shadow: 0 4px 15px rgba(255, 165, 0, 0.4);
+            z-index: 100;
+            text-align: center;
+        }
+        
+        .level-display .level {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        
+        .level-display .exp-bar {
+            width: 100px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        
+        .level-display .exp-fill {
+            height: 100%;
+            background: white;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        
+        .weather-display {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            font-size: 32px;
+            z-index: 100;
+            text-align: center;
+            animation: float 3s ease-in-out infinite;
+            user-select: none;
+            pointer-events: auto;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .dialog-bubble {
+            position: fixed;
+            background: white;
+            padding: 10px 16px;
+            border-radius: 16px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+            z-index: 50;
+            font-size: 14px;
+            max-width: 200px;
+            animation: bubblePop 0.3s ease-out;
+            pointer-events: none;
+        }
+        
+        .dialog-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 8px solid white;
+        }
+        
+        @keyframes bubblePop {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .mobile-hint {
+            display: none;
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 100;
+        }
+
+        /* 面板拖拽手柄 */
+        .drag-handle {
+            cursor: grab;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ccc;
+            font-size: 12px;
+            line-height: 1;
+            letter-spacing: 2px;
+        }
+        .drag-handle:hover { color: #999; }
+        .drag-handle:active { cursor: grabbing; }
+
+        .panel-handle-bar {
+            width: 100%;
+            height: 6px;
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            background: rgba(0,0,0,0.05);
+            margin-bottom: 4px;
+            transition: background 0.2s;
+        }
+        .panel-handle-bar:hover { background: rgba(0,0,0,0.12); }
+        .panel-handle-bar:active { cursor: grabbing; background: rgba(0,0,0,0.18); }
+        .panel-handle-dots {
+            display: flex;
+            gap: 3px;
+        }
+        .panel-handle-dots i {
+            width: 4px; height: 4px;
+            background: #ccc;
+            border-radius: 50%;
+        }
+        .panel-handle-bar:hover .panel-handle-dots i { background: #999; }
+
+        @media (max-width: 600px) {
+            .status-bar {
+                top: 10px;
+                left: 10px;
+                padding: 12px;
+                min-width: 150px;
+            }
+            
+            .status-bar h3 {
+                font-size: 12px;
+            }
+            
+            .toolbar {
+                bottom: 10px;
+                padding: 10px 12px;
+                gap: 6px;
+            }
+            
+            .toolbar button {
+                padding: 6px 8px;
+                min-width: 44px;
+                font-size: 9px;
+            }
+            
+            .toolbar button .icon {
+                font-size: 18px;
+            }
+            
+            .level-display {
+                top: 10px;
+                right: 10px;
+                padding: 8px 14px;
+            }
+            
+            .level-display .level {
+                font-size: 18px;
+            }
+            
+            .weather-display {
+                top: 80px;
+                right: 10px;
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Electron 透明窗口适配：检测是否在 Electron 环境中 -->
+    <script>if(typeof electronAPI!=='undefined'){document.documentElement.classList.add('electron');}</script>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="status-bar" id="statusBar" data-panel-id="status-bar">
+        <div class="panel-handle-bar"><div class="panel-handle-dots"><i></i><i></i><i></i></div></div>
+        <h3>🐱 罗小黑</h3>
+        <div class="status-item">
+            <span class="icon">🍖</span>
+            <div class="bar-container">
+                <div class="bar" id="hungerBar" style="width: 100%; background: #4CAF50;"></div>
+            </div>
+            <span class="value" id="hungerValue">100</span>
+        </div>
+        <div class="status-item">
+            <span class="icon">🧼</span>
+            <div class="bar-container">
+                <div class="bar" id="cleanBar" style="width: 100%; background: #4CAF50;"></div>
+            </div>
+            <span class="value" id="cleanValue">100</span>
+        </div>
+        <div class="status-item">
+            <span class="icon">😊</span>
+            <div class="bar-container">
+                <div class="bar" id="moodBar" style="width: 100%; background: #4CAF50;"></div>
+            </div>
+            <span class="value" id="moodValue">100</span>
+        </div>
+        <div class="status-item">
+            <span class="icon">⚡</span>
+            <div class="bar-container">
+                <div class="bar" id="energyBar" style="width: 100%; background: #4CAF50;"></div>
+            </div>
+            <span class="value" id="energyValue">100</span>
+        </div>
+        <div class="status-item">
+            <span class="icon">❤️</span>
+            <div class="bar-container">
+                <div class="bar" id="healthBar" style="width: 100%; background: #4CAF50;"></div>
+            </div>
+            <span class="value" id="healthValue">100</span>
+            <span class="sick-badge" id="sickBadge" style="display:none;">🤒生病</span>
+        </div>
+        <div class="status-item">
+            <span class="icon">💰</span>
+            <span id="coinValue" style="font-weight: bold; color: #FF9800;">0</span>
+        </div>
+    </div>
+    
+        <div class="level-display" data-panel-id="level-panel">
+            <div class="panel-handle-bar"><div class="panel-handle-dots"><i></i><i></i><i></i></div></div>
+            <div class="level" id="levelDisplay">Lv.1</div>
+            <div class="exp-bar">
+                <div class="exp-fill" id="expFill" style="width: 0%;"></div>
+            </div>
+            <div style="font-size: 10px; margin-top: 4px;" id="expText">0 / 100 EXP</div>
+            <div class="weather-display" id="weatherDisplay">☀️</div>
+        </div>
+    
+    <div class="toolbar" data-panel-id="toolbar">
+        <div class="panel-handle-bar"><div class="panel-handle-dots"><i></i><i></i><i></i></div></div>
+        <button class="tool-btn" onclick="pet.feed()"
+                data-effect="饱食 +30，心情 +5"
+                data-cost="10">
+            <span class="icon">🍖</span>
+            <span class="label">喂食</span>
+        </button>
+        <button class="tool-btn" onclick="pet.play()"
+                data-effect="心情 +25，经验 +10，精力 -15"
+                data-cost="0">
+            <span class="icon">🎾</span>
+            <span class="label">玩耍</span>
+        </button>
+        <button class="tool-btn" onclick="pet.bathe()"
+                data-effect="健康 +10（生病时无效），清洁 +40，心情 +10，精力 -10"
+                data-cost="15">
+            <span class="icon">🚿</span>
+            <span class="label">洗澡</span>
+        </button>
+        <button class="tool-btn" onclick="pet.medicine()"
+                data-effect="健康 +40"
+                data-cost="20">
+            <span class="icon">💊</span>
+            <span class="label">看病</span>
+        </button>
+        <button class="tool-btn" onclick="pet.study()"
+                data-effect="经验 +，金币 +（随等级提升），精力 -15"
+                data-cost="-1">
+            <span class="icon">📚</span>
+            <span class="label">学习</span>
+        </button>
+        <button class="tool-btn" onclick="pet.work()"
+                data-effect="金币 +（随等级提升），经验 +5，精力/饱食 -"
+                data-cost="-1">
+            <span class="icon">💼</span>
+            <span class="label">打工</span>
+        </button>
+        <button class="tool-btn" onclick="pet.sleep()"
+                data-effect="先回猫窝，精力快速回复、健康/心情小幅恢复"
+                data-cost="0">
+            <span class="icon">😴</span>
+            <span class="label">睡觉</span>
+        </button>
+        <button class="tool-btn" id="resetBtn"
+                data-effect="清空存档，所有数值恢复初始状态"
+                data-cost="0">
+            <span class="icon">🔄</span>
+            <span class="label">重置</span>
+        </button>
+        <button class="tool-btn" id="passThroughBtn"
+                data-effect="穿透模式：空白区域点击穿透到桌面，不影响正常操作"
+                data-cost="0">
+            <span class="icon">🖱️</span>
+            <span class="label">穿透</span>
+        </button>
+    </div>
+
+    <div class="tooltip" id="toolTip"></div>
+    
+    <div class="mobile-hint" id="mobileHint">双击罗小黑可以撒娇哦~</div>
+
+    <script>
+        // 全局错误诊断（显示红色提示条帮助定位问题）
+        window.addEventListener('error', function(e) {
+            if (e.filename && e.filename.indexOf('index.html') >= 0) {
+                console.error('JS Error:', e.message, 'line', e.lineno);
+                if (document.body) {
+                    var div = document.createElement('div');
+                    div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:red;color:#fff;padding:8px 16px;font-size:12px;font-family:monospace;white-space:pre-wrap;';
+                    div.textContent = 'JS Error: ' + e.message + ' (line ' + e.lineno + ')';
+                    document.body.appendChild(div);
+                }
+            }
+            return false;
+        });
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 罗小黑图片
+        const petImages = {
+            stand: new Image(),
+            smile: new Image(),
+            sleep: new Image(),
+            jump: new Image(),
+            eat: new Image(),
+            job: new Image(),
+            study: new Image(),
+            walk: new Image(),
+            sick: new Image()
+        };
+        
+        // 图片路径
+        petImages.stand.src = 'luoxiaohei_stand.png';
+        petImages.smile.src = 'luoxiaohei_smile.png';
+        petImages.sleep.src = 'luoxiaohei_sleep.png';
+        petImages.jump.src = 'luoxiaohei_jump.png';
+        petImages.eat.src = 'luoxiaohei_eat.png';
+        petImages.job.src = 'luoxiaohei_job.png';
+        petImages.study.src = 'luoxiaohei_study.png';
+        petImages.walk.src = 'luoxiaohei_walk.png';
+        petImages.sick.src = 'luoxiaohei_sick.png';
+        
+        let imagesLoaded = false;
+        Promise.all([
+            new Promise(resolve => { petImages.stand.onload = resolve; petImages.stand.onerror = resolve; }),
+            new Promise(resolve => { petImages.smile.onload = resolve; petImages.smile.onerror = resolve; }),
+            new Promise(resolve => { petImages.sleep.onload = resolve; petImages.sleep.onerror = resolve; }),
+            new Promise(resolve => { petImages.jump.onload = resolve; petImages.jump.onerror = resolve; }),
+            new Promise(resolve => { petImages.eat.onload = resolve; petImages.eat.onerror = resolve; }),
+            new Promise(resolve => { petImages.job.onload = resolve; petImages.job.onerror = resolve; }),
+            new Promise(resolve => { petImages.study.onload = resolve; petImages.study.onerror = resolve; }),
+            new Promise(resolve => { petImages.walk.onload = resolve; petImages.walk.onerror = resolve; }),
+            new Promise(resolve => { petImages.sick.onload = resolve; petImages.sick.onerror = resolve; })
+        ]).then(() => { imagesLoaded = true; });
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', () => { resizeCanvas(); loadScreenWorkAreas(); });
+        
+        // ========== 屏幕可见区域管理（基于实际显示器工作区） ==========
+        let screenWorkAreas = [];  // [{x, y, w, h}, ...] 窗口相对坐标
+        
+        async function loadScreenWorkAreas() {
+            try {
+                if (window.electronAPI) {
+                    const areas = await window.electronAPI.getScreenWorkAreas();
+                    if (areas && areas.length > 0) { screenWorkAreas = areas; return; }
+                }
+            } catch(e) { /* 非 Electron 环境降级 */ }
+            // 降级：整个 canvas 作为可见区域
+            screenWorkAreas = [{ x: 0, y: 0, w: canvas.width, h: canvas.height }];
+        }
+        
+        // 获取包含/最接近给定 X 坐标的屏幕工作区域
+        function getScreenArea(x) {
+            if (screenWorkAreas.length === 0) return { x: 0, y: 0, w: canvas.width, h: canvas.height };
+            for (const area of screenWorkAreas) {
+                if (x >= area.x && x <= area.x + area.w) return area;
+            }
+            let best = screenWorkAreas[0], bestDist = Infinity;
+            for (const area of screenWorkAreas) {
+                const cx = Math.max(area.x, Math.min(area.x + area.w, x));
+                const d = Math.abs(cx - x);
+                if (d < bestDist) { bestDist = d; best = area; }
+            }
+            return best;
+        }
+        
+        // 将坐标 clamp 到最近的可见屏幕区域（margin 为边距，确保物体不贴边）
+        function clampToScreen(x, y, margin = 0) {
+            if (screenWorkAreas.length === 0) return [x, y];
+            for (const area of screenWorkAreas) {
+                if (x >= area.x + margin && x <= area.x + area.w - margin &&
+                    y >= area.y + margin && y <= area.y + area.h - margin) return [x, y];
+            }
+            let bx = x, by = y, bd = Infinity;
+            for (const area of screenWorkAreas) {
+                const cx = Math.max(area.x + margin, Math.min(area.x + area.w - margin, x));
+                const cy = Math.max(area.y + margin, Math.min(area.y + area.h - margin, y));
+                const d = (cx - x) ** 2 + (cy - y) ** 2;
+                if (d < bd) { bd = d; bx = cx; by = cy; }
+            }
+            return [bx, by];
+        }
+        
+        // 获取指定 X 坐标处的地面 Y（屏幕底部往上留 180px 作为地面）
+        function getGroundY(x) {
+            const area = getScreenArea(x);
+            return Math.max(area.y + 180, area.y + area.h - 180);
+        }
+        
+        // 异步加载屏幕区域，加载完成后对宠物及场景物品做一次位置修正
+        loadScreenWorkAreas().then(() => {
+            if (window._petInstance) {
+                const [cx, cy] = clampToScreen(window._petInstance.x, window._petInstance.y, window._petInstance.size * 0.5);
+                window._petInstance.x = cx;
+                window._petInstance.y = Math.min(cy, getGroundY(cx));
+            }
+            // 修正猫窝和食盆初始位置
+            const [hx] = clampToScreen(catHouse.x, catHouse.y, 60);
+            catHouse.x = hx;
+            catHouse.y = getGroundY(hx);
+            const [bx] = clampToScreen(catBowl.x, catBowl.y, 50);
+            catBowl.x = bx;
+            catBowl.y = getGroundY(bx);
+        });
+        
+        // ========== 简化粒子类 ==========
+        class Particle {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.life = 1;
+                this.decay = 0.015 + Math.random() * 0.01; // 更慢衰减
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = -Math.random() * 2 - 1;
+                this.size = 8 + Math.random() * 6;
+                this.rotation = 0;
+                this.rotationSpeed = 0;
+                
+                const symbols = {
+                    'heart': '❤️',
+                    'coin': '💰',
+                    'star': '⭐',
+                    'water': '💦',
+                    'zzz': '💤',
+                    'sweat': '💧',
+                    'sparkle': '✨'
+                };
+                this.symbol = symbols[type] || '✨';
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.03; // 更轻的重力
+                this.life -= this.decay;
+            }
+            
+            draw(ctx) {
+                if (this.life <= 0) return;
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.9;
+                ctx.font = `${this.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.symbol, this.x, this.y);
+                ctx.restore();
+            }
+        }
+        
+        // 云朵类
+        class Cloud {
+            constructor() {
+                this.reset();
+            }
+            
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = 50 + Math.random() * 100;
+                this.speed = 0.15 + Math.random() * 0.2;
+                this.size = 25 + Math.random() * 30;
+                this.opacity = 0.25 + Math.random() * 0.25;
+            }
+            
+            update() {
+                this.x += this.speed;
+                if (this.x > canvas.width + 100) {
+                    this.x = -100;
+                    this.y = 50 + Math.random() * 100;
+                }
+            }
+            
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.opacity;
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 0.5, 0, Math.PI * 2);
+                ctx.arc(this.x + this.size * 0.4, this.y - this.size * 0.1, this.size * 0.4, 0, Math.PI * 2);
+                ctx.arc(this.x + this.size * 0.8, this.y, this.size * 0.45, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        
+        // ========== 简化天气粒子 ==========
+        class WeatherParticle {
+            constructor(type) {
+                this.type = type;
+                this.reset();
+            }
+            
+            reset() {
+                this.x = Math.random() * canvas.width;
+                this.y = -10;
+                // 下雨：更慢更稀疏；下雪：更慢
+                this.speed = this.type === 'rainy' ? 6 + Math.random() * 3 : 0.8 + Math.random() * 1.5;
+                this.size = this.type === 'rainy' ? 12 : 4;
+                this.opacity = this.type === 'rainy' ? 0.4 : 0.7;
+                this.wind = (Math.random() - 0.5) * 1.5;
+            }
+            
+            update() {
+                this.y += this.speed;
+                this.x += this.wind;
+                if (this.y > canvas.height) this.reset();
+            }
+            
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = this.opacity;
+                if (this.type === 'rainy') {
+                    ctx.strokeStyle = '#64B5F6';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x, this.y);
+                    ctx.lineTo(this.x + this.wind * 1.5, this.y + this.size);
+                    ctx.stroke();
+                } else if (this.type === 'snowy') {
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+        
+        // 宠物类 - 简化动画逻辑
+        class Pet {
+            constructor() {
+                this.x = canvas.width / 2;
+                this.y = canvas.height - 180;
+                window._petInstance = this;  // 供屏幕区域加载后修正位置
+                this.size = 120;
+                this.direction = 1;
+                
+                // 简化状态：保留 idle, walking, jumping, sleeping, eating，新增 studying / working
+                this.state = 'idle';
+                this.stateTimer = 0;
+                this.frameCount = 0;
+                this.alive = true;           // 是否存活
+
+                // 数值
+                this.hunger = 100;
+                this.mood = 100;
+                this.energy = 100;
+                this.health = 100;
+                this.clean = 50;
+                this.coin = 50;
+                this.exp = 0;
+                this.level = 1;
+                
+                // 移动状态
+                this.isMoving = false;
+                this.isDragging = false;
+                this.targetX = this.x;
+                this.targetY = this.y;
+                this.jumpVelocity = 0;
+                
+                // 特效（减少）
+                this.particles = [];
+                this.clouds = Array(3).fill(null).map(() => new Cloud());
+                this.weatherParticles = [];
+                this.weather = 'sunny';
+                this.inShelter = false;   // 是否正在猫窝躲雨
+                this.seekShelter = false; // 是否正在前往猫窝
+                this.seekFood = false;    // 是否正在前往食盆吃饭
+                this.seekBed = false;     // 是否正前往猫窝睡觉
+                
+                // 对话
+                this.dialogText = '';
+                this.dialogTimer = 0;
+                this.lastClickTime = 0;
+                this.clickTimer = null;
+                
+                this.load();
+                // 离线衰减可能导致死亡
+                if (this.health <= 0) {
+                    this.health = 0;
+                    this.alive = false;
+                    this.state = 'dead';
+                }
+                this.setRandomWeather();
+                if (this.alive) {
+                    this.showDialog(this.getWelcomeDialog());
+                } else {
+                    this.showDialog('罗小黑离开了... 点击↗️重置按钮重新开始', true);
+                }
+            }
+            
+            getWelcomeDialog() {
+                const hour = new Date().getHours();
+                if (hour < 6) return '困了...要睡觉了...';
+                if (hour < 9) return '早上好！今天也要精神满满哦~';
+                if (hour < 12) return '上午好！';
+                if (hour < 14) return '中午好！肚子有点饿了...';
+                if (hour < 18) return '下午好！';
+                if (hour < 22) return '晚上好！';
+                return '夜深了，该睡觉了...';
+            }
+            
+            setRandomWeather() {
+                const weathers = ['sunny', 'rainy', 'snowy'];
+                const weights = [0.6, 0.3, 0.1];
+                let random = Math.random();
+                for (let i = 0; i < weights.length; i++) {
+                    if (random < weights[i]) {
+                        this.weather = weathers[i];
+                        break;
+                    }
+                    random -= weights[i];
+                }
+                
+                document.getElementById('weatherDisplay').textContent = 
+                    this.weather === 'sunny' ? '☀️' : 
+                    this.weather === 'rainy' ? '🌧️' : '❄️';
+                
+                // 天气粒子减半
+                this.weatherParticles = [];
+                if (this.weather !== 'sunny') {
+                    const count = this.weather === 'rainy' ? 50 : 25;
+                    for (let i = 0; i < count; i++) {
+                        this.weatherParticles.push(new WeatherParticle(this.weather));
+                    }
+                }
+            }
+            
+            save() {
+                const data = {
+                    hunger: this.hunger,
+                    mood: this.mood,
+                    energy: this.energy,
+                    health: this.health,
+                    clean: this.clean,
+                    coin: this.coin,
+                    exp: this.exp,
+                    level: this.level,
+                    lastSave: Date.now()
+                };
+                localStorage.setItem('luoxiaohei_pet_data', JSON.stringify(data));
+            }
+            
+            load() {
+                const saved = localStorage.getItem('luoxiaohei_pet_data');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    // 离线期间状态冻结，直接恢复存档值
+                    this.hunger = data.hunger;
+                    this.mood   = data.mood;
+                    this.energy = data.energy;
+                    this.health = data.health;
+                    this.clean  = data.clean != null ? data.clean : 50;
+                    this.coin   = data.coin;
+                    this.exp    = data.exp;
+                    this.level  = data.level;
+                    
+                    this.checkLevelUp();
+                }
+            }
+            
+            getMaxExp() {
+                return Math.floor(100 * Math.pow(1.5, this.level - 1));
+            }
+            
+            addExp(amount) {
+                this.exp += amount;
+                this.checkLevelUp();
+            }
+            
+            checkLevelUp() {
+                while (this.exp >= this.getMaxExp()) {
+                    this.exp -= this.getMaxExp();
+                    this.level++;
+                    this.spawnParticles(this.x, this.y - 60, 'star', 8);
+                    this.showDialog(`升级了！现在是 Lv.${this.level}！💼打工赚更多、更省力🎉`);
+                }
+                this.updateUI();
+            }
+            
+            showDialog(text, permanent = false) {
+                this.dialogText = text;
+                this.dialogTimer = permanent ? -1 : 150;
+            }
+            
+            // 减少特效粒子生成
+            spawnParticles(x, y, type, count = 3) {
+                for (let i = 0; i < count; i++) {
+                    this.particles.push(new Particle(x + (Math.random() - 0.5) * 20, y, type));
+                }
+            }
+            
+            feed() {
+                if (!this.alive) return;
+                if (this.coin < 10) {
+                    this.showDialog('金币不够了...');
+                    return;
+                }
+                if (this.hunger >= 100) {
+                    this.showDialog('吃不下了...');
+                    return;
+                }
+                
+                this.coin -= 10;
+                this.hunger = Math.min(100, this.hunger + 30);
+                this.mood = Math.min(100, this.mood + 5);
+                this.state = 'eating';
+                this.stateTimer = 60;
+                this.spawnParticles(this.x, this.y - 50, 'heart', 2);
+                this.showDialog('好吃！谢谢喂食~');
+                this.updateUI();
+                this.save();
+            }
+            
+            play() {
+                if (!this.alive) return;
+                if (this.energy < 20) {
+                    this.showDialog('好累...想休息一下');
+                    return;
+                }
+                
+                this.energy = Math.max(0, this.energy - 15);
+                this.mood = Math.min(100, this.mood + 25);
+                this.addExp(10);
+                this.state = 'jumping';
+                this.stateTimer = 90;
+                this.jumpVelocity = -10;
+                this.spawnParticles(this.x, this.y - 50, 'star', 5);
+                this.showDialog('太好玩了！');
+                this.updateUI();
+                this.save();
+            }
+            
+            bathe() {
+                if (!this.alive) return;
+                if (this.coin < 15 || this.energy < 10) {
+                    this.showDialog('状态不够，无法洗澡...');
+                    return;
+                }
+                
+                this.coin -= 15;
+                this.energy = Math.max(0, this.energy - 10);
+                // 洗澡只少量增加健康度；健康度低于50%时只能通过看病恢复
+                if (this.health >= 50) {
+                    this.health = Math.min(100, this.health + 10);
+                }
+                this.clean = Math.min(100, this.clean + 40);
+                this.mood = Math.min(100, this.mood + 10);
+                this.state = 'idle';
+                this.stateTimer = 60;
+                this.spawnParticles(this.x, this.y - 50, 'water', 8);
+                this.showDialog('洗完澡好清爽！');
+                this.updateUI();
+                this.save();
+            }
+            
+            medicine() {
+                if (!this.alive) return;
+                if (this.coin < 20) {
+                    this.showDialog('金币不够了...');
+                    return;
+                }
+                if (this.health >= 80) {
+                    this.showDialog('身体很健康！');
+                    return;
+                }
+                
+                this.coin -= 20;
+                this.health = Math.min(100, this.health + 40);
+                this.state = 'idle';
+                this.stateTimer = 60;
+                this.spawnParticles(this.x, this.y - 50, 'sparkle', 6);
+                this.showDialog('感觉好多了！');
+                this.updateUI();
+                this.save();
+            }
+            
+            study() {
+                if (!this.alive) return;
+                if (this.state === 'studying') {
+                    this.showDialog('已经在学习啦~');
+                    return;
+                }
+                if (this.energy < 15) {
+                    this.showDialog('太困了，学不进去...');
+                    return;
+                }
+                
+                this.energy = Math.max(0, this.energy - 15);
+                const expGain = 15 + this.level * 2;
+                const coinGain = 5 + this.level;
+                this.addExp(expGain);
+                this.coin += coinGain;
+                this.state = 'studying';
+                this.stateTimer = 90;
+                this.spawnParticles(this.x, this.y - 50, 'star', 3);
+                this.showDialog(`学习了！经验+${expGain}，金币+${coinGain}`);
+                this.updateUI();
+                this.save();
+            }
+            
+            work() {
+                if (!this.alive) return;
+                if (this.state === 'working') {
+                    this.showDialog('已经在打工啦~');
+                    return;
+                }
+                if (this.energy < 30 || this.hunger < 30) {
+                    this.showDialog('状态不够，打不了工...');
+                    return;
+                }
+                
+                // 等级越高，打工越省力：精力消耗随等级递减（最低 12）
+                const energyCost = Math.max(12, 30 - (this.level - 1) * 2);
+                this.energy = Math.max(0, this.energy - energyCost);
+                this.hunger = Math.max(0, this.hunger - 25);
+                // 等级越高，打工收益越高：每级多赚 10 金币
+                const coinGain = 20 + this.level * 10;
+                this.coin += coinGain;
+                this.addExp(5);
+                this.state = 'working';
+                this.stateTimer = 90;
+                this.spawnParticles(this.x, this.y - 50, 'coin', 5);
+                this.showDialog(`打工完成！金币+${coinGain}（精力-${energyCost}）`);
+                this.updateUI();
+                this.save();
+            }
+            
+            sleep() {
+                if (!this.alive) return;
+                if (this.state === 'sleeping') {
+                    this.state = 'idle';
+                    this.seekBed = false;
+                    this.showDialog('睡醒了~');
+                } else if (this.seekBed) {
+                    // 正在回窝，再次点击则取消
+                    this.seekBed = false;
+                    this.isMoving = false;
+                    this.state = 'idle';
+                    this.showDialog('不想睡了~');
+                } else {
+                    // 先回到猫窝再睡
+                    this.seekBed = true;
+                    this.isMoving = true;
+                    this.targetX = catHouse.x;
+                    this.targetY = catHouse.y;
+                    this.seekShelter = false;
+                    this.seekFood = false;
+                    this.inShelter = false;
+                    this.state = 'walking';
+                    this.stateTimer = 0;
+                    this.showDialog('回猫窝睡觉觉~');
+                }
+            }
+            
+            reset() {
+                // 清空所有存档
+                localStorage.removeItem('luoxiaohei_pet_data');
+                localStorage.removeItem('luoxiaohei_pet_props');
+                localStorage.removeItem('luoxiaohei_pet_panels');
+
+                // 恢复数值
+                this.hunger = 100;
+                this.mood = 100;
+                this.energy = 100;
+                this.health = 100;
+                this.clean = 50;
+                this.coin = 50;
+                this.exp = 0;
+                this.level = 1;
+
+                // 恢复状态
+                this.alive = true;
+                this.state = 'idle';
+                this.stateTimer = 0;
+                this.direction = 1;
+                this.isMoving = false;
+                this.isDragging = false;
+                this.targetX = this.x;
+                this.targetY = this.y;
+                this.jumpVelocity = 0;
+                this.inShelter = false;
+                this.seekShelter = false;
+                this.seekFood = false;
+                this.seekBed = false;
+                this.dialogText = '';
+                this.dialogTimer = 0;
+
+                // 移除死亡样式
+                document.body.classList.remove('dead');
+
+                // 重置猫窝/食盆到默认位置
+                catHouse.x = clampToScreen(canvas.width - 130, canvas.height - 180, 60)[0];
+                catHouse.y = getGroundY(catHouse.x);
+                catBowl.x = clampToScreen(120, canvas.height - 180, 50)[0];
+                catBowl.y = getGroundY(catBowl.x);
+
+                this.save();
+                this.showDialog(this.getWelcomeDialog());
+                this.updateUI();
+            }
+            
+            update() {
+                this.frameCount++;
+                
+                // 自然衰减 / 状态回复（每秒一次）
+                if (this.frameCount % 180 === 0 && this.alive) {
+                    if (this.state === 'sleeping') {
+                        // 睡觉：精力快速回复，健康/心情小幅恢复（健康<50%时只能看病恢复）
+                        this.energy = Math.min(100, this.energy + 6);
+                        if (this.health >= 50) {
+                            this.health = Math.min(100, this.health + 0.5);
+                        }
+                        this.mood   = Math.min(100, this.mood + 1);
+                        this.hunger = Math.max(0, this.hunger - 0.2);
+                        // 睡饱（精力满）自动醒来
+                        if (this.energy >= 100) {
+                            this.state = 'idle';
+                            this.showDialog('睡饱啦！精神满满~');
+                        }
+                    } else {
+                        this.hunger = Math.max(0, this.hunger - 0.5);
+                        this.mood = Math.max(0, this.mood - 0.3);
+                        this.energy = Math.min(100, this.energy + 0.5);
+                        this.health = Math.max(0, this.health - 0.1);
+                        this.clean = Math.max(0, this.clean - 0.1); // 清洁度缓慢下降
+                    }
+                    this.updateUI();
+                    // 节流保存：每 30 秒写一次，配合页面关闭/隐藏时保存，
+                    // 既避免频繁写 localStorage，又能让离线衰减正常工作
+                    this.saveCounter = (this.saveCounter || 0) + 1;
+                    if (this.saveCounter >= 30) {
+                        this.save();
+                        this.saveCounter = 0;
+                    }
+                }
+                
+                // ═══ 死亡判定 ═══
+                if (this.health <= 0 && this.alive) {
+                    this.health = 0;
+                    this.alive = false;
+                    this.state = 'dead';
+                    document.body.classList.add('dead');
+                    this.showDialog('罗小黑离开了... 点击↗️重置按钮重新开始', true);
+                    this.updateUI();
+                    this.save();
+                }
+                
+                // 状态计时
+                if (this.stateTimer > 0) {
+                    this.stateTimer--;
+                    if (this.stateTimer === 0) {
+                        this.state = 'idle';
+                    }
+                }
+                
+                // 宠物已死亡 → 仅维持云/粒子/对话框，不进行任何行为逻辑
+                if (!this.alive) {
+                    this.clouds.forEach(cloud => cloud.update());
+                    this.weatherParticles.forEach(p => p.update());
+                    this.particles = this.particles.filter(p => { p.update(); return p.life > 0; });
+                    if (this.dialogTimer > 0) this.dialogTimer--;
+                    return;
+                }
+                
+                // 饥饿自动去食盆吃饭：饥饿降到 50% 以下且空闲时，主动走到食盆进食
+                if (!this.isDragging && !this.isMoving && !this.seekFood &&
+                    this.state !== 'eating' && this.state !== 'sleeping' &&
+                    this.state !== 'studying' && this.state !== 'working' &&
+                    this.hunger <= 50) {
+                    this.targetX = catBowl.x;
+                    this.targetY = catBowl.y;
+                    this.isMoving = true;
+                    this.seekFood = true;
+                    this.state = 'walking';
+                    this.showDialog('肚子饿啦，去食盆吃饭饭~');
+                }
+
+                // 下雨缓慢增加清洁度（效果类似洗澡）：猫没躲雨、没睡觉、没被拖动时，
+                // 每约 5 秒增加 1 点
+                if (this.weather === 'rainy' && !this.inShelter && this.state !== 'sleeping' &&
+                    !this.isDragging && this.frameCount % 300 === 0) {
+                    this.clean = Math.min(100, this.clean + 1);
+                    this.spawnParticles(this.x, this.y - 50, 'water', 1);
+                    this.updateUI();
+                }
+
+                // 恶劣天气自动回猫窝躲雨
+                const badWeather = (this.weather === 'rainy' || this.weather === 'snowy');
+                if (this.inShelter && !badWeather) {
+                    this.inShelter = false;
+                    this.showDialog('雨停了，出来玩吧~');
+                }
+                // 清洁度低于 50% 时不躲雨（留在雨里洗澡）；达到 50% 后才会去躲雨
+                if (this.inShelter && badWeather && this.clean < 50) {
+                    this.inShelter = false;
+                    this.showDialog('去淋淋雨，洗个澡~');
+                }
+                if (badWeather && !this.isDragging && !this.isMoving && !this.inShelter &&
+                    this.clean >= 50 && this.state !== 'jumping' && this.state !== 'eating' && this.state !== 'sleeping' &&
+                    this.state !== 'studying' && this.state !== 'working') {
+                    this.targetX = catHouse.x;
+                    this.targetY = catHouse.y;
+                    this.isMoving = true;
+                    this.seekShelter = true;
+                    this.state = 'walking';
+                }
+                
+                // 精力低于15%自动去睡觉：精力过低时自动走回猫窝睡觉恢复精力
+                if (!this.isDragging && !this.isMoving && !this.seekBed && !this.inShelter &&
+                    this.state !== 'sleeping' && this.state !== 'eating' &&
+                    this.state !== 'studying' && this.state !== 'working' &&
+                    this.state !== 'jumping' && !this.seekFood && !this.seekShelter &&
+                    this.energy <= 15) {
+                    this.targetX = catHouse.x;
+                    this.targetY = catHouse.y;
+                    this.isMoving = true;
+                    this.seekBed = true;
+                    this.seekShelter = false;
+                    this.seekFood = false;
+                    this.inShelter = false;
+                    this.state = 'walking';
+                    this.stateTimer = 0;
+                    this.showDialog('好困...回窝睡觉了💤');
+                }
+                
+                // 移动处理
+                if (!this.isDragging && this.isMoving) {
+                    const dx = this.targetX - this.x;
+                    const dy = this.targetY - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist > 5) {
+                        const speed = 3.5;
+                        this.x += (dx / dist) * speed;
+                        this.y += (dy / dist) * speed;
+                        this.direction = dx > 0 ? 1 : -1;
+                    } else {
+                        this.isMoving = false;
+                        if (this.seekShelter) {
+                            this.seekShelter = false;
+                            this.inShelter = true;
+                            this.showDialog('下雨啦，躲进猫窝~');
+                        } else if (this.seekFood) {
+                            this.seekFood = false;
+                            this.state = 'eating';
+                            this.stateTimer = 90;
+                            this.spawnParticles(this.x, this.y - 50, 'heart', 2);
+                            this.showDialog('吃好好~饱饱的！');
+                            this.hunger = Math.min(100, this.hunger + 45);
+                            this.mood = Math.min(100, this.mood + 8);
+                            this.updateUI();
+                            this.save();
+                        } else if (this.seekBed) {
+                            this.seekBed = false;
+                            this.state = 'sleeping';
+                            this.stateTimer = 0;
+                            this.spawnParticles(this.x, this.y - 70, 'zzz', 2);
+                            this.showDialog('呼噜呼噜~睡着了');
+                        }
+                        if (this.state !== 'eating' && this.state !== 'sleeping') {
+                            this.state = 'idle';
+                        }
+                    }
+                }
+                
+                // 跳跃（一次干净的弹跳，落地即停）
+                if (this.state === 'jumping') {
+                    this.jumpVelocity += 0.6;
+                    this.y += this.jumpVelocity;
+                    const groundY = getGroundY(this.x);
+                    if (this.y >= groundY) {
+                        this.y = groundY;
+                        this.state = 'idle';
+                        this.jumpVelocity = 0;
+                    }
+                }
+                
+                // 睡觉时生成少量ZZZ
+                if (this.state === 'sleeping' && this.frameCount % 90 === 0) {
+                    this.spawnParticles(this.x + 30, this.y - 70, 'zzz', 1);
+                }
+                
+                // 屏幕边界检测（基于实际显示器可见区域）
+                const margin = this.size * 0.5;
+                if (screenWorkAreas.length > 0) {
+                    const area = getScreenArea(this.x);
+                    const minX = area.x + margin;
+                    const maxX = area.x + area.w - margin;
+                    if (this.x < minX) { this.x = minX; this.direction = 1; }
+                    if (this.x > maxX) { this.x = maxX; this.direction = -1; }
+                } else {
+                    if (this.x < margin) { this.x = margin; this.direction = 1; }
+                    if (this.x > canvas.width - margin) { this.x = canvas.width - margin; this.direction = -1; }
+                }
+                
+                // 底部边界（动态地面，基于当前所在屏幕）
+                const groundY = getGroundY(this.x);
+                if (this.y > groundY) { this.y = groundY; }
+                
+                // 更新云朵
+                this.clouds.forEach(cloud => cloud.update());
+                
+                // 更新天气粒子
+                this.weatherParticles.forEach(p => p.update());
+                
+                // 更新粒子
+                this.particles = this.particles.filter(p => {
+                    p.update();
+                    return p.life > 0;
+                });
+                
+                // 对话计时
+                if (this.dialogTimer > 0) {
+                    this.dialogTimer--;
+                }
+                
+                // 【移除】随机状态切换和随机移动，纯被动交互
+            }
+            
+            updateUI() {
+                const updateBar = (id, value) => {
+                    const bar = document.getElementById(id);
+                    bar.style.width = value + '%';
+                    if (value > 60) {
+                        bar.style.background = '#4CAF50';
+                    } else if (value > 30) {
+                        bar.style.background = '#FF9800';
+                    } else {
+                        bar.style.background = '#F44336';
+                    }
+                };
+                
+                updateBar('hungerBar', this.hunger);
+                updateBar('moodBar', this.mood);
+                updateBar('energyBar', this.energy);
+                updateBar('healthBar', this.health);
+                updateBar('cleanBar', this.clean);
+                
+                document.getElementById('hungerValue').textContent = Math.floor(this.hunger);
+                document.getElementById('moodValue').textContent = Math.floor(this.mood);
+                document.getElementById('energyValue').textContent = Math.floor(this.energy);
+                document.getElementById('healthValue').textContent = Math.floor(this.health);
+                document.getElementById('cleanValue').textContent = Math.floor(this.clean);
+
+                // 健康度 < 50% 显示生病标志
+                const sick = document.getElementById('sickBadge');
+                if (sick) sick.style.display = this.health < 50 ? 'inline' : 'none';
+                document.getElementById('coinValue').textContent = this.coin;
+                
+                document.getElementById('levelDisplay').textContent = `Lv.${this.level}`;
+                document.getElementById('expFill').style.width = (this.exp / this.getMaxExp() * 100) + '%';
+                document.getElementById('expText').textContent = `${Math.floor(this.exp)} / ${this.getMaxExp()} EXP`;
+            }
+            
+            getCurrentImage() {
+                const state = this.state;
+                
+                if (state === 'sleeping') {
+                    return petImages.sleep;
+                } else if (state === 'eating') {
+                    return petImages.eat;
+                } else if (state === 'jumping') {
+                    return petImages.jump;
+                } else if (state === 'working') {
+                    return petImages.job;
+                } else if (state === 'studying') {
+                    return petImages.study;
+                } else if (state === 'walking') {
+                    return petImages.walk;
+                } else if (this.health < 50) {
+                    return petImages.sick;
+                } else if (this.mood > 80) {
+                    return petImages.smile;
+                } else {
+                    return petImages.stand;
+                }
+            }
+            
+            draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // 绘制云朵
+                this.clouds.forEach(cloud => cloud.draw(ctx));
+                
+                // 绘制天气（猫窝棚顶遮挡区域内的雨/雪不绘制，实现"挡雨"）
+                this.weatherParticles.forEach(p => {
+                    if (!catHouse.contains(p.x, p.y)) p.draw(ctx);
+                });
+                
+                // 猫窝身体、棚顶和食盆都在宠物身后
+                catHouse.drawBack(ctx);
+                catHouse.drawRoof(ctx);
+                catBowl.draw(ctx);
+
+                // 绘制罗小黑
+                this.drawPet();
+                
+                // 绘制粒子
+                this.particles.forEach(p => p.draw(ctx));
+                
+                // 绘制对话框
+                if ((this.dialogTimer > 0 || this.dialogTimer === -1) && this.dialogText) {
+                    this.drawDialog();
+                }
+            }
+            
+            drawPet() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // 死亡状态特别渲染
+                if (!this.alive) {
+                    this.drawDead();
+                    ctx.restore();
+                    return;
+                }
+                
+                // 简化动画：每个状态只用一个简单效果
+                let scaleY = 1;
+                let offsetY = 0;
+                
+                // idle: 轻微呼吸 / 生病时轻微颤抖
+                if (this.state === 'idle') {
+                    if (this.health < 50) {
+                        offsetY = Math.sin(this.frameCount * 0.2) * -2;
+                    } else {
+                        scaleY = 1 + Math.sin(this.frameCount * 0.05) * 0.02;
+                    }
+                }
+                // walking: 轻微上下
+                else if (this.state === 'walking') {
+                    offsetY = Math.abs(Math.sin(this.frameCount * 0.15)) * -5;
+                }
+                // jumping: 跳跃高度
+                else if (this.state === 'jumping') {
+                    scaleY = 1.05;
+                }
+                // sleeping: 轻微起伏
+                else if (this.state === 'sleeping') {
+                    scaleY = 1 + Math.sin(this.frameCount * 0.03) * 0.015;
+                }
+                // eating: 轻微上下
+                else if (this.state === 'eating') {
+                    offsetY = Math.sin(this.frameCount * 0.3) * -3;
+                }
+                // studying: 小幅点头
+                else if (this.state === 'studying') {
+                    offsetY = Math.sin(this.frameCount * 0.25) * -2;
+                }
+                // working: 小幅摆动
+                else if (this.state === 'working') {
+                    offsetY = Math.sin(this.frameCount * 0.3) * -2;
+                }
+                
+                ctx.scale(this.direction, scaleY);
+                ctx.translate(0, offsetY);
+                
+                // 获取图片
+                const img = this.getCurrentImage();
+                
+                // 绘制图片（加载完成且实际有像素才绘制，否则用 emoji 兜底）
+                if (imagesLoaded && img.complete && img.naturalWidth > 0) {
+                    const imgWidth = this.size;
+                    const imgHeight = this.size * (img.height / img.width);
+                    ctx.drawImage(img, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+                } else {
+                    ctx.fillStyle = '#333';
+                    ctx.font = '24px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('🐱', 0, 0);
+                }
+                
+                // 睡觉时的ZZZ
+                if (this.state === 'sleeping') {
+                    ctx.font = `${this.size * 0.18}px Arial`;
+                    ctx.textAlign = 'left';
+                    ctx.fillText('💤', this.size * 0.35, -this.size * 0.5);
+                }
+                
+                ctx.restore();
+            }
+            
+            drawDead() {
+                // 死亡效果：半透明宠物 + 漂浮幽灵
+                ctx.globalAlpha = 0.28;
+                const img = this.getCurrentImage();
+                if (imagesLoaded && img.complete && img.naturalWidth > 0) {
+                    const imgWidth = this.size * 0.75;
+                    const imgHeight = imgWidth * (img.height / img.width);
+                    ctx.drawImage(img, -imgWidth / 2, -imgHeight / 2, imgWidth, imgHeight);
+                }
+                ctx.globalAlpha = 1;
+                
+                // 漂浮幽灵动画
+                const ghostY = -this.size * 0.55 + Math.sin(this.frameCount * 0.03) * 6;
+                ctx.font = '26px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('👻', 0, ghostY);
+                
+                // 光环
+                ctx.beginPath();
+                ctx.arc(0, ghostY, 16, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(180,200,255,0.45)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // 脚下十字架/墓碑
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = 'rgba(120,120,120,0.6)';
+                ctx.fillText('†', 0, this.size * 0.55);
+            }
+            
+            drawDialog() {
+                const bubbleX = this.x;
+                const bubbleY = this.y - this.size - 50;
+                
+                // 先按宽度折行，再按需决定气泡高度，避免长文本被裁切
+                ctx.font = '13px sans-serif';
+                const maxWidth = 140;
+                const chars = this.dialogText.split('');
+                let line = '';
+                const lines = [];
+                for (const ch of chars) {
+                    const test = line + ch;
+                    if (ctx.measureText(test).width > maxWidth && line) {
+                        lines.push(line);
+                        line = ch;
+                    } else {
+                        line = test;
+                    }
+                }
+                if (line) lines.push(line);
+                
+                const lineH = 18;
+                const padX = 14, padY = 12;
+                const w = Math.max(90, Math.min(230, maxWidth + padX * 2));
+                const h = lines.length * lineH + padY * 2;
+                const bx = bubbleX - w / 2;
+                const by = bubbleY - h;
+                
+                ctx.fillStyle = 'white';
+                ctx.strokeStyle = '#ddd';
+                ctx.lineWidth = 1;
+                
+                ctx.beginPath();
+                ctx.roundRect(bx, by, w, h, 12);
+                ctx.fill();
+                ctx.stroke();
+                
+                // 小三角
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.moveTo(bubbleX - 8, by + h);
+                ctx.lineTo(bubbleX, by + h + 13);
+                ctx.lineTo(bubbleX + 8, by + h);
+                ctx.fill();
+                
+                // 文字
+                ctx.fillStyle = '#333';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                let ty = by + padY + lineH / 2;
+                for (const l of lines) {
+                    ctx.fillText(l, bubbleX, ty);
+                    ty += lineH;
+                }
+            }
+            
+            handleClick(clientX, clientY) {
+                if (!this.alive) return;
+                const dx = clientX - this.x;
+                const dy = clientY - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist < this.size * 1.2) {
+                    const now = Date.now();
+                    if (this.lastClickTime && now - this.lastClickTime < 300) {
+                        // 双击：撒娇（取消尚未触发的单次对话）
+                        if (this.clickTimer) { clearTimeout(this.clickTimer); this.clickTimer = null; }
+                        this.lastClickTime = 0;
+                        this.cuddle();
+                    } else {
+                        // 首次点击：延迟 250ms 触发随机对话，避免双击时先弹出随机对话
+                        this.lastClickTime = now;
+                        if (this.clickTimer) clearTimeout(this.clickTimer);
+                        this.clickTimer = setTimeout(() => {
+                            this.clickTimer = null;
+                            this.lastClickTime = 0;
+                            this.showRandomDialog();
+                        }, 250);
+                    }
+                } else {
+                    // 点空白处：走到该 X 位置（沿地面行走，约束在可见区域内）
+                    const margin = this.size * 0.5;
+                    const [tx] = clampToScreen(clientX, getGroundY(clientX), margin);
+                    this.targetX = tx;
+                    this.targetY = getGroundY(tx);
+                    this.isMoving = true;
+                    this.state = 'walking';
+                    this.inShelter = false;
+                    this.seekShelter = false;
+                    this.seekFood = false;
+                }
+            }
+            
+            cuddle() {
+                if (!this.alive) return;
+                if (this.state !== 'sleeping') {
+                    this.mood = Math.min(100, this.mood + 15);
+                    this.state = 'idle';
+                    this.stateTimer = 60;
+                    this.spawnParticles(this.x, this.y - 50, 'heart', 6);
+                    this.showDialog('好喜欢~摸摸头~');
+                    this.updateUI();
+                    this.save();
+                }
+            }
+            
+            showRandomDialog() {
+                const dialogs = [
+                    '主人好！',
+                    '今天天气真好~',
+                    '想一起玩吗？',
+                    '好开心~',
+                    '肚子有点饿了...',
+                    '陪我玩嘛~',
+                    '主人主人！',
+                    '好暖和~',
+                    '今天也要加油哦！'
+                ];
+                this.showDialog(dialogs[Math.floor(Math.random() * dialogs.length)]);
+            }
+            
+            handleDrag(clientX, clientY) {
+                if (!this.alive) return;
+                const [cx, cy] = clampToScreen(clientX, clientY, this.size * 0.3);
+                this.x = cx;
+                this.y = Math.min(cy, getGroundY(cx) + 120);
+                this.isDragging = true;
+                this.isMoving = false;
+                this.inShelter = false;
+                this.seekShelter = false;
+                this.seekFood = false;
+            }
+            
+            endDrag() {
+                this.isDragging = false;
+                this.seekFood = false;
+                const groundY = getGroundY(this.x);
+                // 互动奖励：被举起玩耍会增加心情，举得越高越开心
+                const lift = Math.max(0, groundY - this.y);
+                const moodGain = Math.min(15, 3 + lift / 18);
+                this.mood = Math.min(100, this.mood + moodGain);
+                if (lift > 50) {
+                    this.showDialog('被你举高高，好开心！🥰');
+                }
+                // 松手后：在空中则自然掉落（复用跳跃重力），已在地面则直接落地
+                if (this.y < groundY) {
+                    this.state = 'jumping';
+                    this.jumpVelocity = 0;
+                } else {
+                    this.y = groundY;
+                    this.state = 'idle';
+                }
+                this.updateUI();
+            }
+        }
+        
+        // ========== 带棚顶的猫窝 ==========
+        const catHouse = {
+            x: clampToScreen(canvas.width - 130, canvas.height - 180, 60)[0],
+            y: getGroundY(clampToScreen(canvas.width - 130, canvas.height - 180, 60)[0]),
+            // 棚顶遮挡区域：雨/雪落入此区域不绘制（视觉挡雨），也用于判定宠物是否在窝里
+            get roofRect() {
+                const x = this.x, gy = this.y;
+                return { x: x - 100, y: gy - 155, w: 200, h: 105 };
+            },
+            contains(px, py) {
+                const r = this.roofRect;
+                return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+            },
+            // 拖拽命中范围（屋顶 + 屋檐 + 屋身整体）
+            hitTest(px, py) {
+                return px >= this.x - 106 && px <= this.x + 106 &&
+                       py >= this.y - 158 && py <= this.y + 30;
+            },
+            drawBack(ctx) {
+                const x = this.x, gy = this.y;
+                const left = x - 80, right = x + 80;
+                const top = gy - 70, bottom = gy + 25;
+
+                // 地面投影
+                ctx.fillStyle = 'rgba(60,40,30,0.18)';
+                ctx.beginPath();
+                ctx.ellipse(x, bottom + 6, 94, 14, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 屋身（暖色木屋渐变）
+                const bodyGrad = ctx.createLinearGradient(0, top, 0, bottom);
+                bodyGrad.addColorStop(0, '#FFF6E9');
+                bodyGrad.addColorStop(1, '#FBE2C4');
+                ctx.fillStyle = bodyGrad;
+                ctx.beginPath();
+                ctx.roundRect(left, top, right - left, bottom - top, [18, 18, 8, 8]);
+                ctx.fill();
+
+                // 木板横纹（木屋质感）
+                ctx.strokeStyle = 'rgba(180,120,80,0.22)';
+                ctx.lineWidth = 2;
+                for (let i = 1; i <= 3; i++) {
+                    const ly = top + i * (bottom - top) / 4;
+                    ctx.beginPath();
+                    ctx.moveTo(left + 8, ly);
+                    ctx.lineTo(right - 8, ly);
+                    ctx.stroke();
+                }
+
+                // 底部基座
+                ctx.fillStyle = '#E8C9A0';
+                ctx.beginPath();
+                ctx.roundRect(left + 6, bottom - 12, (right - left) - 12, 14, 5);
+                ctx.fill();
+
+                // 圆拱门洞（猫窝入口）
+                const doorW = 60, doorTop = gy - 35, doorBottom = bottom + 2;
+                ctx.fillStyle = '#6D4C41';
+                ctx.beginPath();
+                ctx.moveTo(x - doorW / 2, doorBottom);
+                ctx.lineTo(x - doorW / 2, doorTop);
+                ctx.quadraticCurveTo(x, doorTop - doorW / 2, x + doorW / 2, doorTop);
+                ctx.lineTo(x + doorW / 2, doorBottom);
+                ctx.closePath();
+                ctx.fill();
+                // 门内柔光
+                ctx.fillStyle = 'rgba(255,255,255,0.10)';
+                ctx.beginPath();
+                ctx.ellipse(x - 12, (doorTop + doorBottom) / 2, 7, (doorBottom - doorTop) / 2 - 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 门口小脚垫 + 爪印
+                ctx.fillStyle = '#FFCCBC';
+                ctx.beginPath();
+                ctx.ellipse(x, doorBottom + 3, 40, 9, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#E57373';
+                const paw = (px, py) => {
+                    ctx.beginPath(); ctx.ellipse(px, py, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(px - 5, py - 6, 2, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(px + 5, py - 6, 2, 0, Math.PI * 2); ctx.fill();
+                };
+                paw(x - 12, doorBottom + 3);
+                paw(x + 12, doorBottom + 3);
+
+                // 侧边圆窗（带爱心）
+                const wx = x - 52, wy = gy - 30;
+                ctx.fillStyle = '#FFE0B2';
+                ctx.beginPath(); ctx.arc(wx, wy, 14, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#FFF3E0';
+                ctx.beginPath(); ctx.arc(wx, wy, 10, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#EF9A9A';
+                ctx.beginPath();
+                ctx.moveTo(wx, wy + 5);
+                ctx.bezierCurveTo(wx - 8, wy - 3, wx - 4, wy - 9, wx, wy - 4);
+                ctx.bezierCurveTo(wx + 4, wy - 9, wx + 8, wy - 3, wx, wy + 5);
+                ctx.fill();
+            },
+            drawRoof(ctx) {
+                const x = this.x, gy = this.y;
+                const eave = 100;          // 屋檐半宽
+                const apexY = gy - 150;    // 屋顶最高点
+                const baseY = gy - 62;     // 屋檐底边（在宠物头顶之上）
+                const eaveLeft = x - eave, eaveRight = x + eave;
+
+                // 檐下投影
+                ctx.fillStyle = 'rgba(60,40,30,0.12)';
+                ctx.beginPath();
+                ctx.ellipse(x, baseY + 4, eave + 6, 10, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 屋顶主体（圆润三角，珊瑚色渐变）
+                const roofGrad = ctx.createLinearGradient(0, apexY, 0, baseY);
+                roofGrad.addColorStop(0, '#FF8A80');
+                roofGrad.addColorStop(1, '#FF7043');
+                ctx.fillStyle = roofGrad;
+                ctx.beginPath();
+                ctx.moveTo(eaveLeft, baseY);
+                ctx.quadraticCurveTo(x, apexY, eaveRight, baseY);
+                ctx.closePath();
+                ctx.fill();
+
+                // 浅色挑檐
+                ctx.fillStyle = '#FFAB91';
+                ctx.beginPath();
+                ctx.roundRect(eaveLeft - 6, baseY - 8, (eaveRight - eaveLeft) + 12, 14, 7);
+                ctx.fill();
+
+                // 瓦片弧纹
+                ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+                ctx.lineWidth = 2;
+                for (let i = 1; i <= 3; i++) {
+                    const t = i / 4;
+                    const yy = apexY + (baseY - apexY) * t;
+                    const halfW = eave * (1 - t);
+                    ctx.beginPath();
+                    ctx.moveTo(x - halfW, yy);
+                    ctx.quadraticCurveTo(x, yy - 10 * t, x + halfW, yy);
+                    ctx.stroke();
+                }
+
+                // 顶端小圆球装饰
+                ctx.fillStyle = '#FFE0B2';
+                ctx.beginPath();
+                ctx.arc(x, apexY - 2, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#FF7043';
+                ctx.beginPath();
+                ctx.arc(x, apexY - 2, 3.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        };
+        
+        // ========== 猫食盆 ==========
+        const catBowl = {
+            x: clampToScreen(120, canvas.height - 180, 50)[0],
+            y: getGroundY(clampToScreen(120, canvas.height - 180, 50)[0]),
+            // 食盆固定在场景左侧地面，绘制在宠物身后（进食时宠物遮住盆口，呈"低头吃饭"效果）
+            hitTest(px, py) {
+                return px >= this.x - 50 && px <= this.x + 50 &&
+                       py >= this.y - 5 && py <= this.y + 50;
+            },
+            draw(ctx) {
+                const x = this.x, gy = this.y;
+                const cy = gy + 28; // 碗身略低于宠物中心，贴近地面
+                // 碗外壁（阴影）
+                ctx.fillStyle = '#78909C';
+                ctx.beginPath();
+                ctx.ellipse(x, cy, 46, 17, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // 碗内壁
+                ctx.fillStyle = '#B0BEC5';
+                ctx.beginPath();
+                ctx.ellipse(x, cy - 5, 40, 13, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // 猫粮
+                ctx.fillStyle = '#C98A4B';
+                ctx.beginPath();
+                ctx.ellipse(x, cy - 7, 33, 9, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // 猫粮颗粒
+                ctx.fillStyle = '#8D6E3A';
+                const kibbles = [[-16, -7], [-3, -5], [9, -8], [18, -4], [-9, -10], [3, -10]];
+                kibbles.forEach(([kx, ky]) => {
+                    ctx.beginPath();
+                    ctx.arc(x + kx, cy + ky, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                // 高光
+                ctx.fillStyle = 'rgba(255,255,255,0.45)';
+                ctx.beginPath();
+                ctx.ellipse(x - 14, cy - 6, 9, 3.5, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        };
+        
+        // 初始化宠物
+        const pet = new Pet();
+        
+        // ========== 统一指针事件（鼠标 + 触摸） ==========
+        let pointerDown = false;
+        let dragTarget = null;   // 'pet' | 'house' | 'bowl' | null
+        let dragging = false;
+        let dragOffsetX = 0, dragOffsetY = 0;
+        let downX = 0, downY = 0, downTime = 0;
+
+        function getPos(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function distToPet(x, y) {
+            const dx = x - pet.x, dy = y - pet.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function hitObject(x, y) {
+            // 优先命中宠物，其次猫窝、食盆
+            if (distToPet(x, y) < pet.size * 1.2) return 'pet';
+            if (catHouse.hitTest(x, y)) return 'house';
+            if (catBowl.hitTest(x, y)) return 'bowl';
+            return null;
+        }
+
+        // 鼠标悬停时光标给出可交互提示
+        canvas.addEventListener('mousemove', (e) => {
+            if (pointerDown) return;
+            const { x, y } = getPos(e.clientX, e.clientY);
+            const t = hitObject(x, y);
+            canvas.style.cursor = (t === 'pet' && !pet.alive) ? 'default' : (t === 'pet' ? 'grab' : (t ? 'move' : 'pointer'));
+        });
+
+        function onDown(clientX, clientY) {
+            const { x, y } = getPos(clientX, clientY);
+            pointerDown = true;
+            dragging = false;
+            downX = x; downY = y; downTime = Date.now();
+            dragTarget = hitObject(x, y);
+            // 死亡宠物不可拖拽或点击
+            if (dragTarget === 'pet' && !pet.alive) dragTarget = null;
+            if (dragTarget === 'house') {
+                dragOffsetX = catHouse.x - x;
+                dragOffsetY = catHouse.y - y;
+            } else if (dragTarget === 'bowl') {
+                dragOffsetX = catBowl.x - x;
+                dragOffsetY = catBowl.y - y;
+            }
+            if (dragTarget) canvas.style.cursor = 'grabbing';
+        }
+
+        function onMove(clientX, clientY) {
+            if (!pointerDown) return;
+            const { x, y } = getPos(clientX, clientY);
+            if (dragTarget === 'pet') {
+                if (!dragging && (Math.abs(x - downX) > 8 || Math.abs(y - downY) > 8)) dragging = true;
+                if (dragging) pet.handleDrag(x, y);
+            } else if (dragTarget === 'house') {
+                dragging = true;
+                const [hx, hy] = clampToScreen(x + dragOffsetX, y + dragOffsetY, 60);
+                catHouse.x = hx;
+                catHouse.y = Math.min(hy, getGroundY(hx));
+                pet.inShelter = false; pet.seekShelter = false; // 拖动猫窝时取消躲雨
+            } else if (dragTarget === 'bowl') {
+                dragging = true;
+                const [bx, by] = clampToScreen(x + dragOffsetX, y + dragOffsetY, 50);
+                catBowl.x = bx;
+                catBowl.y = Math.min(by, getGroundY(bx));
+                pet.seekFood = false; // 拖动食盆时取消进食意图
+            }
+        }
+
+        function onUp(clientX, clientY) {
+            if (!pointerDown) return;
+            const { x, y } = getPos(clientX, clientY);
+            const dt = Date.now() - downTime;
+            if (dragTarget === 'pet') {
+                if (dragging) pet.endDrag();
+                else if (dt < 350) pet.handleClick(x, y);
+            } else if (dragTarget === 'house' || dragTarget === 'bowl') {
+                if (dragging) saveProps(); // 摆放完成，保存位置
+            } else {
+                if (dt < 350) pet.handleClick(x, y); // 空白处点击：让宠物走过去
+            }
+            pointerDown = false;
+            dragging = false;
+            dragTarget = null;
+            canvas.style.cursor = (hitObject(x, y) === 'pet' && !pet.alive) ? 'default' : (hitObject(x, y) === 'pet' ? 'grab' : 'pointer');
+        }
+
+        canvas.addEventListener('mousedown', (e) => onDown(e.clientX, e.clientY));
+        canvas.addEventListener('mousemove', (e) => onMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', (e) => onUp(e.clientX, e.clientY));
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            onDown(t.clientX, t.clientY);
+        }, { passive: false });
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            onMove(t.clientX, t.clientY);
+        }, { passive: false });
+        canvas.addEventListener('touchend', (e) => {
+            const t = e.changedTouches[0];
+            onUp(t.clientX, t.clientY);
+        });
+        
+        // 隐藏移动端提示
+        if ('ontouchstart' in window) {
+            document.getElementById('mobileHint').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('mobileHint').style.display = 'none';
+            }, 5000);
+        }
+        
+        // 猫窝 / 食盆位置持久化（localStorage）
+        function saveProps() {
+            try {
+                localStorage.setItem('luoxiaohei_pet_props', JSON.stringify({
+                    houseX: catHouse.x, houseY: catHouse.y,
+                    bowlX: catBowl.x, bowlY: catBowl.y
+                }));
+            } catch (e) {}
+        }
+        function loadProps() {
+            try {
+                const saved = localStorage.getItem('luoxiaohei_pet_props');
+                if (!saved) return;
+                const d = JSON.parse(saved);
+                if (typeof d.houseX === 'number') catHouse.x = d.houseX;
+                if (typeof d.houseY === 'number') catHouse.y = d.houseY;
+                if (typeof d.bowlX === 'number') catBowl.x = d.bowlX;
+                if (typeof d.bowlY === 'number') catBowl.y = d.bowlY;
+            } catch (e) {}
+        }
+
+        // ========== Electron 交互区域上报（光标穿透桌面） ==========
+        let _regionTicker = 0;
+        let passThroughMode = true; // 默认穿透：空白区域点击透传到桌面，不影响正常操作
+        function reportInteractiveRegions() {
+            try {
+                if (!window.electronAPI) return;
+                if (pointerDown && (dragTarget === 'pet' || dragTarget === 'house' || dragTarget === 'bowl')) {
+                    window.electronAPI.updateRegions([{ x: 0, y: 0, w: canvas.width, h: canvas.height }]);
+                    return;
+                }
+                const regions = [];
+                // 穿透模式关闭时，整个窗口可交互（支持点击空白处让宠物走动）
+                if (!passThroughMode) {
+                    regions.push({ x: 0, y: 0, w: canvas.width, h: canvas.height });
+                } else {
+                    regions.push({ x: 0, y: 0, w: 1, h: 1 }); // 兜底：至少一个区域，否则 Electron 报错
+                }
+                const collect = (sel, pad) => {
+                    const el = document.querySelector(sel);
+                    if (el) { const r = el.getBoundingClientRect(); regions.push({ x: Math.floor(r.x - pad), y: Math.floor(r.y - pad), w: Math.ceil(r.width + pad * 2), h: Math.ceil(r.height + pad * 2) }); }
+                };
+                collect('.toolbar', 0);
+                collect('.status-bar', 8);
+                collect('.level-display', 0);
+                collect('.weather-display', 4);
+                if (pet) {
+                    const s = pet.size * 0.8;
+                    const px = Math.floor(pet.x - s), py = Math.floor(pet.y - s);
+                    regions.push({ x: px, y: py, w: Math.ceil(s * 2), h: Math.ceil(s * 2) });
+                }
+                regions.push({ x: Math.floor(catHouse.x - 106), y: Math.floor(catHouse.y - 158), w: 212, h: 188 });
+                regions.push({ x: Math.floor(catBowl.x - 50), y: Math.floor(catBowl.y - 5), w: 100, h: 55 });
+                window.electronAPI.updateRegions(regions);
+            } catch(e) { console.error('reportInteractiveRegions error:', e); }
+        }
+
+        // 游戏循环
+        function gameLoop() {
+            pet.update();
+            pet.draw();
+
+            // 每 6 帧上报一次交互区域（约 100ms），避免 IPC 过频
+            _regionTicker++;
+            if (_regionTicker % 6 === 0) reportInteractiveRegions();
+
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // 每60秒切换天气
+        setInterval(() => {
+            pet.setRandomWeather();
+        }, 60000);
+        
+        loadProps(); // 读取上次摆放的猫窝/食盆位置
+        gameLoop();
+        
+        // 页面关闭或切到后台时立即存档，保证离线衰减基于真实离开时间
+        window.addEventListener('beforeunload', () => pet.save());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') pet.save();
+        });
+        
+        pet.updateUI();
+
+        // ========== 工具栏按钮悬停提示（效果 + 金币消耗） ==========
+        (function setupTooltips() {
+            const tip = document.getElementById('toolTip');
+            const buttons = document.querySelectorAll('.toolbar .tool-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('mouseenter', () => {
+                    const effect = btn.getAttribute('data-effect') || '';
+                    const cost = parseInt(btn.getAttribute('data-cost'), 10);
+                    let costHtml, cls;
+                    if (isNaN(cost) || cost === 0) {
+                        costHtml = '金币消耗：0';
+                        cls = 'cost-free';
+                    } else if (cost < 0) {
+                        costHtml = '金币：获得（互动时结算）';
+                        cls = 'cost-gain';
+                    } else {
+                        costHtml = '金币消耗：' + cost;
+                        cls = 'cost-pay';
+                    }
+                    tip.innerHTML =
+                        '<span class="tt-effect">效果：' + effect + '</span>' +
+                        '<span class="tt-cost ' + cls + '">' + costHtml + '</span>';
+                    const rect = btn.getBoundingClientRect();
+                    tip.style.left = (rect.left + rect.width / 2) + 'px';
+                    tip.style.top = (rect.top - 10) + 'px';
+                    tip.style.display = 'block';
+                });
+                btn.addEventListener('mouseleave', () => {
+                    tip.style.display = 'none';
+                });
+            });
+            // 窗口滚动/缩放时隐藏提示，避免错位
+            window.addEventListener('scroll', () => { tip.style.display = 'none'; }, true);
+        })();
+
+        // ========== 面板拖拽系统（状态栏、等级、天气、工具栏） ==========
+        (function setupPanelDrag() {
+            const PANEL_KEY = 'luoxiaohei_pet_panels';
+            const dragged = new Set();
+
+            function savePositions() {
+                const data = {};
+                document.querySelectorAll('[data-panel-id]').forEach(el => {
+                    const r = el.getBoundingClientRect();
+                    data[el.dataset.panelId] = { l: Math.round(r.left), t: Math.round(r.top) };
+                });
+                try { localStorage.setItem(PANEL_KEY, JSON.stringify(data)); } catch(e) {}
+            }
+
+            function loadPositions() {
+                try {
+                    const data = JSON.parse(localStorage.getItem(PANEL_KEY));
+                    if (!data) return;
+                    document.querySelectorAll('[data-panel-id]').forEach(el => {
+                        const pos = data[el.dataset.panelId];
+                        if (!pos || typeof pos.l !== 'number' || typeof pos.t !== 'number') return;
+                        // 钳制到可见屏幕范围内（防止旧的多屏存档把面板放到屏幕外）
+                        const rect = el.getBoundingClientRect();
+                        const w = rect.width || 200, h = rect.height || 60;
+                        const maxL = Math.max(0, window.innerWidth - w);
+                        const maxT = Math.max(0, window.innerHeight - h);
+                        const l = Math.max(0, Math.min(pos.l, maxL));
+                        const t = Math.max(0, Math.min(pos.t, maxT));
+                        el.style.left = l + 'px';
+                        el.style.top  = t + 'px';
+                        el.style.right = 'auto';
+                        el.style.bottom = 'auto';
+                        el.style.transform = 'none';
+                        el.classList.add('dragged');
+                        dragged.add(el);
+                    });
+                    // 立即持久化修正后的位置，避免下次仍读到屏幕外坐标
+                    savePositions();
+                } catch(e) {}
+            }
+
+            document.querySelectorAll('[data-panel-id]').forEach(panel => {
+                const handle = panel.querySelector('.panel-handle-bar') || panel;
+
+                let active = false, sx = 0, sy = 0, sl = 0, st = 0;
+
+                const onDown = (e) => {
+                    if (e.button !== undefined && e.button !== 0) return;
+                    active = true;
+                    const r = panel.getBoundingClientRect();
+                    sl = r.left; st = r.top;
+                    sx = e.touches ? e.touches[0].clientX : e.clientX;
+                    sy = e.touches ? e.touches[0].clientY : e.clientY;
+                    panel.style.transition = 'none';
+                    e.preventDefault();
+                };
+
+                const onMove = (e) => {
+                    if (!active) return;
+                    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+                    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+                    panel.style.left = (sl + cx - sx) + 'px';
+                    panel.style.top  = (st + cy - sy) + 'px';
+                    panel.style.right = 'auto';
+                    panel.style.bottom = 'auto';
+                    panel.style.transform = 'none';
+                };
+
+                const onUp = () => {
+                    if (!active) return;
+                    active = false;
+                    panel.style.transition = '';
+                    panel.classList.add('dragged');
+                    dragged.add(panel);
+                    savePositions();
+                };
+
+                handle.addEventListener('mousedown', onDown);
+                handle.addEventListener('touchstart', onDown, { passive: false });
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('touchmove', onMove, { passive: false });
+                document.addEventListener('mouseup', onUp);
+                document.addEventListener('touchend', onUp);
+                document.addEventListener('touchcancel', onUp);
+            });
+
+            // ---- 重置按钮（双击确认） ----
+            (function setupResetBtn() {
+                const resetBtn = document.getElementById('resetBtn');
+                if (!resetBtn) return;
+
+                let confirmTimer = null;
+                const originalText = resetBtn.querySelector('.label').textContent;
+                const originalIcon = resetBtn.querySelector('.icon').textContent;
+
+                function cancelConfirm() {
+                    if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
+                    resetBtn.classList.remove('resetting');
+                    resetBtn.querySelector('.icon').textContent = originalIcon;
+                    resetBtn.querySelector('.label').textContent = originalText;
+                }
+
+                resetBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (resetBtn.classList.contains('resetting')) {
+                        // 第二次点击：执行重置（内存重建，不依赖 location.reload）
+                        cancelConfirm();
+                        pet.reset();
+                    } else {
+                        // 第一次点击：进入确认状态
+                        resetBtn.classList.add('resetting');
+                        resetBtn.querySelector('.icon').textContent = '⚠️';
+                        resetBtn.querySelector('.label').textContent = '确认重置?';
+                        confirmTimer = setTimeout(cancelConfirm, 3000);
+                    }
+                });
+
+                // 点击页面其他地方取消确认
+                document.addEventListener('click', (e) => {
+                    if (resetBtn.classList.contains('resetting') && !resetBtn.contains(e.target)) {
+                        cancelConfirm();
+                    }
+                }, true);
+
+                // ESC 取消
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && resetBtn.classList.contains('resetting')) {
+                        cancelConfirm();
+                    }
+                });
+            })();
+
+            // ---- 穿透模式切换 ----
+            (function setupPassThrough() {
+                const btn = document.getElementById('passThroughBtn');
+                if (!btn) return;
+
+                // 从 localStorage 恢复设置（默认穿透=开启）
+                try {
+                    const saved = localStorage.getItem('luoxiaohei_pass_through');
+                    if (saved === 'off') {
+                        passThroughMode = false;
+                        btn.classList.remove('active');
+                        btn.querySelector('.label').textContent = '全屏';
+                    } else {
+                        passThroughMode = true;
+                        btn.classList.add('active');
+                        btn.querySelector('.label').textContent = '穿透';
+                    }
+                } catch (e) {}
+
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    passThroughMode = !passThroughMode;
+                    if (passThroughMode) {
+                        btn.classList.add('active');
+                        btn.querySelector('.label').textContent = '穿透';
+                        localStorage.setItem('luoxiaohei_pass_through', 'on');
+                    } else {
+                        btn.classList.remove('active');
+                        btn.querySelector('.label').textContent = '全屏';
+                        localStorage.setItem('luoxiaohei_pass_through', 'off');
+                    }
+                });
+            })();
+
+            loadPositions();
+        })();
+
+    </script>
+</body>
+</html>

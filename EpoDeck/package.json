@@ -1,0 +1,45 @@
+{
+    "name": "epodeck",
+    "version": "1.0.0",
+    "description": "EpoDeck 纪念日浮窗 - Windows 桌面端",
+    "author": "EpoDeck",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "electron-builder",
+        "build:win": "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& electron-builder --win"
+    },
+    "devDependencies": {
+        "electron": "^28.0.0",
+        "electron-builder": "^24.0.0"
+    },
+    "build": {
+        "appId": "com.epodeck.widget",
+        "productName": "EpoDeck",
+        "directories": {
+            "output": "dist"
+        },
+        "files": [
+            "main.js",
+            "preload.js",
+            "index.html",
+            "icon.png"
+        ],
+        "win": {
+            "target": [
+                "nsis",
+                "portable"
+            ],
+            "icon": "icon.png"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "shortcutName": "EpoDeck"
+        },
+        "electronDownload": {
+            "mirror": "https://npmmirror.com/mirrors/electron/"
+        }
+    }
+}

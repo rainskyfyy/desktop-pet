@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'unsafe-inline' 'self'">
+<title>EpoDeck 纪念日浮窗</title>
+<style>
+:root {
+    --bg: hsl(40 30% 96%);
+    --card: hsl(40 33% 98%);
+    --foreground: hsl(30 20% 16%);
+    --muted: hsl(35 12% 90%);
+    --muted-foreground: hsl(30 10% 45%);
+    --primary: hsl(32 70% 55%);
+    --primary-soft: hsl(32 70% 55% / 0.08);
+    --border: hsl(35 15% 86%);
+    --destructive: hsl(0 72% 51%);
+    --warning: hsl(38 92% 50%);
+    --success: hsl(142 70% 40%);
+    --accent: hsl(35 20% 93%);
+    --radius: 14px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: transparent; overflow: hidden; }
+body {
+    font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+}
+.drag { -webkit-app-region: drag; }
+.no-drag, button, input, label, .content-scroll { -webkit-app-region: no-drag; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input { font-family: inherit; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-thumb { background: hsl(35 10% 80%); border-radius: 3px; }
+
+/* ── 浮窗主体 ── */
+.widget {
+    width: 100vw; height: 100vh;
+    display: flex; flex-direction: column;
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+}
+
+/* 标题栏 */
+.titlebar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px 6px 14px;
+    background: linear-gradient(135deg, hsl(30 25% 14%), hsl(30 20% 20%));
+    color: hsl(40 30% 96% / 0.85);
+    flex-shrink: 0;
+}
+.titlebar .dots { display: flex; gap: 6px; }
+.titlebar .dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot.r { background: hsl(0 72% 51% / 0.75); }
+.dot.y { background: hsl(38 92% 50% / 0.75); }
+.dot.g { background: hsl(142 70% 40% / 0.75); }
+.titlebar .title {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    font-size: 11px; letter-spacing: 0.05em; color: hsl(40 30% 96% / 0.5);
+}
+.win-btns { display: flex; gap: 2px; }
+.win-btns button {
+    width: 24px; height: 20px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    color: hsl(40 30% 96% / 0.55); transition: all .15s;
+}
+.win-btns button:hover { background: hsl(0 0% 100% / 0.12); color: #fff; }
+.win-btns button.close:hover { background: var(--destructive); }
+
+/* 控制栏 */
+.control-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; flex-shrink: 0;
+}
+.seg { display: flex; gap: 2px; background: var(--muted); border-radius: 9px; padding: 2px; }
+.seg button {
+    height: 26px; padding: 0 10px; border-radius: 7px;
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--muted-foreground); transition: all .15s;
+}
+.seg button.active { background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); }
+.control-right { display: flex; align-items: center; gap: 6px; }
+.ghost-btn {
+    height: 26px; padding: 0 8px; border-radius: 7px;
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--muted-foreground); transition: all .15s;
+}
+.ghost-btn:hover { color: var(--foreground); background: var(--accent); }
+.ghost-btn.on { color: var(--primary); }
+.primary-btn {
+    height: 26px; padding: 0 12px; border-radius: 7px;
+    display: flex; align-items: center; gap: 4px;
+    font-size: 12px; font-weight: 500;
+    background: var(--primary); color: #fff; transition: filter .15s;
+}
+.primary-btn:hover { filter: brightness(1.08); }
+.primary-btn:disabled { opacity: .5; cursor: default; }
+
+.divider { height: 1px; background: var(--border); margin: 0 12px; flex-shrink: 0; }
+
+/* 内容区 */
+.content-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.content-scroll.no-anim, .content-scroll.no-anim * { animation: none !important; }
+.view-anim { animation: viewIn .25s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes viewIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+
+/* ── 时钟视图 ── */
+.clock-view { display: flex; flex-direction: column; align-items: center; padding: 18px 16px 14px; gap: 16px; }
+.big-clock { display: flex; align-items: baseline; justify-content: center; gap: 1px; }
+.big-clock .hm { font-size: 52px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+.big-clock .colon { font-size: 52px; font-weight: 700; color: var(--primary); transition: opacity .3s; line-height: 1; }
+.big-clock .colon.dim { opacity: .25; }
+.big-clock .sec { font-size: 30px; font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }
+.date-line { display: flex; align-items: center; gap: 6px; margin-top: 10px; justify-content: center; font-size: 13px; color: var(--muted-foreground); }
+
+.card-box {
+    width: 100%; max-width: 320px;
+    border-radius: 12px; border: 1px solid var(--border);
+    background: hsl(40 33% 98% / 0.7);
+    padding: 14px 18px;
+}
+.card-box.urgent { border-color: hsl(38 92% 50% / 0.5); background: hsl(38 92% 50% / 0.06); box-shadow: 0 2px 10px hsl(38 92% 50% / 0.12); }
+.card-box.pinned { border-color: hsl(32 70% 55% / 0.35); background: var(--primary-soft); padding: 10px 14px; }
+.card-head { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+.card-head .label { font-size: 11px; color: var(--muted-foreground); }
+.card-head .name { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge {
+    font-size: 10px; padding: 2px 7px; border-radius: 20px; flex-shrink: 0;
+    border: 1px solid var(--border); color: var(--muted-foreground);
+}
+.badge.solid { background: var(--primary); border-color: var(--primary); color: #fff; }
+.badge.warn { background: var(--destructive); border-color: var(--destructive); color: #fff; animation: pulse 1.5s infinite; }
+.badge.gray { background: var(--muted); color: var(--muted-foreground); }
+@keyframes pulse { 50% { opacity: .55; } }
+.recur-tag { font-size: 10px; color: var(--muted-foreground); flex-shrink: 0; }
+
+.count-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.count-cell { display: flex; flex-direction: column; align-items: center; }
+.count-cell .num { font-size: 20px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
+.count-cell.small .num { font-size: 16px; }
+.count-cell .unit { font-size: 10px; color: var(--muted-foreground); margin-top: 2px; }
+.elapsed-block { margin-top: 8px; padding-top: 8px; border-top: 1px solid hsl(32 70% 55% / 0.15); }
+.elapsed-title { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted-foreground); margin-bottom: 6px; }
+.card-foot { margin-top: 10px; text-align: center; font-size: 10px; color: var(--muted-foreground); }
+
+.pinned-section { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 8px; }
+.pinned-label { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted-foreground); font-weight: 500; padding: 0 4px; }
+.unpin-btn { padding: 3px; border-radius: 5px; color: var(--muted-foreground); display: flex; flex-shrink: 0; }
+.unpin-btn:hover { color: var(--destructive); background: hsl(0 72% 51% / 0.1); }
+
+.empty-box { width: 100%; max-width: 320px; border: 1px solid var(--border); border-radius: 12px; padding: 22px; text-align: center; color: var(--muted-foreground); background: hsl(40 33% 98% / 0.5); }
+.empty-box p { font-size: 13px; margin-top: 8px; }
+.empty-box .sub { font-size: 11px; opacity: .65; margin-top: 4px; }
+
+/* ── 列表视图 ── */
+.list-view { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.list-item {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: hsl(40 33% 98% / 0.65);
+    padding: 9px 11px; transition: background .15s; min-width: 0;
+    animation: itemIn .3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+@keyframes itemIn { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+.list-item:hover { background: var(--card); }
+.list-item.nearby { border-color: hsl(32 70% 55% / 0.5); background: var(--primary-soft); }
+.item-icon {
+    width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent); color: var(--foreground);
+}
+.item-icon.holiday { background: hsl(32 70% 55% / 0.12); color: var(--primary); }
+.item-info { flex: 1; min-width: 0; }
+.item-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.item-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-date { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
+.item-elapsed { font-size: 11px; color: hsl(32 70% 55% / 0.85); margin-top: 2px; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 3px; white-space: nowrap; overflow: hidden; }
+.item-actions { display: none; align-items: center; gap: 2px; flex-shrink: 0; }
+.list-item:hover .item-actions { display: flex; }
+.item-actions.always { display: flex; }
+.icon-btn {
+    width: 26px; height: 26px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted-foreground); transition: all .15s;
+}
+.icon-btn:hover { color: var(--primary); background: var(--accent); }
+.icon-btn.danger:hover { color: var(--destructive); background: hsl(0 72% 51% / 0.1); }
+.icon-btn.pinned { color: var(--primary); }
+.list-foot { display: flex; justify-content: space-between; padding: 2px 6px 0; font-size: 11px; color: var(--muted-foreground); }
+.list-foot span { display: flex; align-items: center; gap: 4px; }
+
+/* 底部状态栏 */
+.statusbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 14px; border-top: 1px solid var(--border);
+    background: hsl(35 12% 90% / 0.3); flex-shrink: 0;
+}
+.status-left { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted-foreground); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(30 10% 45% / 0.3); }
+.status-dot.on { background: var(--success); animation: pulse 2s infinite; }
+.status-right { font-size: 10px; color: hsl(30 10% 45% / 0.5); display: flex; align-items: center; gap: 4px; }
+
+/* ── 弹窗 ── */
+.overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgb(0 0 0 / 0.45);
+    display: none; align-items: center; justify-content: center;
+    border-radius: 16px;
+}
+.overlay.open { display: flex; animation: fadeIn .18s; }
+@keyframes fadeIn { from { opacity: 0; } }
+.dialog {
+    width: 330px; max-height: 92vh; overflow-y: auto;
+    background: var(--card); border-radius: 14px; border: 1px solid var(--border);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.35);
+    padding: 18px; animation: dlgIn .22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes dlgIn { from { opacity: 0; transform: scale(.95) translateY(8px); } }
+.dialog-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+.dialog-title svg { color: var(--primary); }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: var(--muted); border-radius: 9px; padding: 2px; margin-bottom: 14px; }
+.tabs button {
+    height: 28px; border-radius: 7px; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    color: var(--muted-foreground);
+}
+.tabs button.active { background: var(--card); color: var(--foreground); box-shadow: 0 1px 3px rgb(0 0 0 / 0.1); }
+.field { margin-bottom: 14px; }
+.field label.lbl { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+.text-input {
+    width: 100%; height: 34px; padding: 0 10px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); font-size: 13px; outline: none;
+    transition: border-color .15s, box-shadow .15s;
+}
+.text-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px hsl(32 70% 55% / 0.18); }
+.date-input { width: 150px; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; }
+.switch-row {
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px;
+}
+.switch-row .t { font-size: 13px; font-weight: 500; }
+.switch-row .d { font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
+.switch {
+    width: 38px; height: 22px; border-radius: 20px; flex-shrink: 0;
+    background: hsl(35 10% 80%); position: relative; transition: background .2s;
+}
+.switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.25); transition: transform .2s;
+}
+.switch.on { background: var(--primary); }
+.switch.on::after { transform: translateX(16px); }
+.w-full-btn {
+    width: 100%; height: 34px; border-radius: 8px;
+    background: var(--primary); color: #fff; font-size: 13px; font-weight: 500;
+    transition: filter .15s;
+}
+.w-full-btn:hover { filter: brightness(1.08); }
+.w-full-btn:disabled { opacity: .5; }
+
+.holiday-list { max-height: 210px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin: 10px 0 14px; }
+.holiday-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 9px; cursor: pointer; transition: background .15s;
+}
+.holiday-row:hover { background: var(--accent); }
+.holiday-row .hname { font-size: 13px; font-weight: 500; }
+.holiday-row .hdesc { font-size: 11px; color: var(--muted-foreground); margin-top: 1px; }
+.checkbox {
+    width: 17px; height: 17px; border-radius: 5px; flex-shrink: 0;
+    border: 1.5px solid hsl(35 10% 70%); background: var(--bg);
+    display: flex; align-items: center; justify-content: center; transition: all .15s;
+}
+.checkbox.on { background: var(--primary); border-color: var(--primary); }
+.checkbox svg { display: none; }
+.checkbox.on svg { display: block; }
+.select-all-row {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border); padding-bottom: 10px;
+    font-size: 13px; font-weight: 500;
+}
+.select-all-row .left { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.select-all-row .cnt { font-size: 11px; color: var(--muted-foreground); font-weight: 400; }
+
+/* 确认弹窗 */
+.confirm-dialog { width: 290px; text-align: left; }
+.confirm-dialog .desc { font-size: 13px; color: var(--muted-foreground); margin: 8px 0 18px; }
+.confirm-btns { display: flex; justify-content: flex-end; gap: 8px; }
+.btn-plain { height: 30px; padding: 0 14px; border-radius: 7px; font-size: 12px; border: 1px solid var(--border); }
+.btn-plain:hover { background: var(--accent); }
+.btn-danger { height: 30px; padding: 0 14px; border-radius: 7px; font-size: 12px; background: var(--destructive); color: #fff; }
+.btn-danger:hover { filter: brightness(1.1); }
+
+/* Toast */
+.toasts { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+.toast {
+    background: hsl(30 20% 16%); color: hsl(40 30% 96%);
+    font-size: 12px; padding: 8px 16px; border-radius: 9px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.3);
+    animation: toastIn .25s cubic-bezier(0.16, 1, 0.3, 1);
+    max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.toast.out { animation: toastOut .3s forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(6px); } }
+</style>
+</head>
+<body>
+<div class="widget">
+    <!-- 标题栏（拖拽区域） -->
+    <div class="titlebar drag">
+        <div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
+        <div class="title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            EpoDeck 纪念日浮窗
+        </div>
+        <div class="win-btns no-drag">
+            <button id="btn-hide" title="隐藏到托盘">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/></svg>
+            </button>
+            <button id="btn-close" class="close" title="退出">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- 控制栏 -->
+    <div class="control-bar">
+        <div class="seg">
+            <button id="seg-clock">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                时钟
+            </button>
+            <button id="seg-list">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+                列表
+            </button>
+        </div>
+        <div class="control-right">
+            <button id="btn-reminder" class="ghost-btn"></button>
+            <button id="btn-add" class="primary-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                添加
+            </button>
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 内容区 -->
+    <div class="content-scroll" id="content"></div>
+
+    <!-- 底部状态栏 -->
+    <div class="statusbar drag">
+        <div class="status-left no-drag">
+            <div class="status-dot" id="status-dot"></div>
+            <span id="status-text">提醒已关闭</span>
+        </div>
+        <div class="status-right no-drag">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            EpoDeck 桌面版
+        </div>
+    </div>
+</div>
+
+<!-- 添加/编辑弹窗 -->
+<div class="overlay" id="dlg-overlay">
+    <div class="dialog">
+        <div class="dialog-title" id="dlg-title"></div>
+        <div class="tabs" id="dlg-tabs">
+            <button data-tab="custom" class="active">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                自定义纪念日
+            </button>
+            <button data-tab="holidays">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5.8 11.3 2 22l10.7-3.79M4 3h.01M22 8h.01M15 2h.01M22 20h.01M9 10l6.5 6.5M9 10a5 5 0 0 0 13.5-3.5M2.5 9A5 5 0 0 0 9 10"/></svg>
+                导入法定公休日
+            </button>
+        </div>
+        <!-- 自定义表单 -->
+        <div id="tab-custom">
+            <div class="field">
+                <label class="lbl">纪念日名称</label>
+                <input class="text-input" id="f-name" maxlength="30" placeholder="例如：生日、入职周年">
+            </div>
+            <div class="field">
+                <label class="lbl">日期</label>
+                <input class="text-input date-input" id="f-date" maxlength="10" inputmode="numeric" placeholder="YYYY/MM/DD">
+            </div>
+            <div class="switch-row">
+                <div><div class="t">每年重复</div><div class="d">开启后每年自动提醒</div></div>
+                <button class="switch" id="f-recurring"></button>
+            </div>
+            <div class="switch-row">
+                <div><div class="t">显示累计时间</div><div class="d">实时显示已过天/时/分/秒</div></div>
+                <button class="switch" id="f-elapsed"></button>
+            </div>
+            <button class="w-full-btn" id="f-submit">添加纪念日</button>
+        </div>
+        <!-- 公休日导入 -->
+        <div id="tab-holidays" style="display:none">
+            <div id="holiday-body"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="overlay" id="confirm-overlay">
+    <div class="dialog confirm-dialog">
+        <div class="dialog-title" style="margin-bottom:0">确认删除</div>
+        <div class="desc" id="confirm-desc"></div>
+        <div class="confirm-btns">
+            <button class="btn-plain" id="confirm-cancel">取消</button>
+            <button class="btn-danger" id="confirm-ok">删除</button>
+        </div>
+    </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+'use strict';
+/* ═══════════════ 数据层（替代原 NestJS + drizzle，本地 JSON 持久化） ═══════════════ */
+
+// 2026 年中国法定节假日（每年按月日重复）
+const HOLIDAYS = [
+    { id: 'h1', name: '元旦',   date: '2026-01-01', description: '新年第一天，放假1天' },
+    { id: 'h2', name: '春节',   date: '2026-02-17', description: '农历新年，放假8天' },
+    { id: 'h3', name: '清明节', date: '2026-04-05', description: '祭祖扫墓，放假3天' },
+    { id: 'h4', name: '劳动节', date: '2026-05-01', description: '国际劳动节，放假5天' },
+    { id: 'h5', name: '端午节', date: '2026-06-19', description: '粽子节，放假3天' },
+    { id: 'h6', name: '中秋节', date: '2026-09-25', description: '团圆赏月，放假3天' },
+    { id: 'h7', name: '国庆节', date: '2026-10-01', description: '祖国生日，放假7天' },
+];
+
+const DEFAULT_SEEDS = [
+    { name: '我的生日', date: '2026-12-25', isRecurring: true,  showElapsed: false },
+    { name: '入职周年', date: '2024-09-01', isRecurring: true,  showElapsed: true  },
+];
+
+const store = {
+    customList: [],           // IMemorialItem[]
+    selectedHolidayIds: [],
+    reminderEnabled: false,
+    pinnedClockIds: [],
+    viewMode: localStorage.getItem('memorial_view_mode') === 'list' ? 'list' : 'clock',
+};
+
+let saveTimer = null;
+function persist() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        window.epodeck && window.epodeck.saveData({
+            customList: store.customList,
+            selectedHolidayIds: store.selectedHolidayIds,
+            reminderEnabled: store.reminderEnabled,
+            pinnedClockIds: store.pinnedClockIds,
+        });
+    }, 300);
+}
+
+function uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
+async function initData() {
+    let data = null;
+    try { data = window.epodeck ? await window.epodeck.loadData() : null; } catch (e) { /* ignore */ }
+    if (data && Array.isArray(data.customList)) {
+        store.customList = data.customList;
+        store.selectedHolidayIds = data.selectedHolidayIds || [];
+        store.reminderEnabled = !!data.reminderEnabled;
+        store.pinnedClockIds = data.pinnedClockIds || [];
+    } else {
+        // 首次运行：播种示例数据
+        store.customList = DEFAULT_SEEDS.map((s) => ({ id: uuid(), createdAt: Date.now(), ...s }));
+        persist();
+    }
+}
+
+/* ═══════════════ 日期工具（移植自 date-fns 用法） ═══════════════ */
+
+const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+function parseDate(str) {
+    const [y, m, d] = str.split('-').map(Number);
+    return new Date(y, m - 1, d);
+}
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+/** 每年重复项滚动到下一次发生日期 */
+function getNextOccurrence(dateStr, isRecurring, now) {
+    const base = parseDate(dateStr);
+    if (!isRecurring) return base;
+    let next = base;
+    while (next < now) next = new Date(next.getFullYear() + 1, next.getMonth(), next.getDate());
+    return next;
+}
+
+function getTimeDiff(target, now) {
+    const totalSec = Math.floor((target - now) / 1000);
+    if (totalSec <= 0) return null;
+    return {
+        days: Math.floor(totalSec / 86400),
+        hours: Math.floor((totalSec % 86400) / 3600),
+        minutes: Math.floor((totalSec % 3600) / 60),
+        seconds: totalSec % 60,
+        totalSec,
+    };
+}
+
+function elapsedParts(origDate, now) {
+    const totalSec = Math.floor((now - origDate) / 1000);
+    if (totalSec <= 0) return null;
+    return {
+        days: Math.floor(totalSec / 86400),
+        hours: Math.floor((totalSec % 86400) / 3600),
+        minutes: Math.floor((totalSec % 3600) / 60),
+        seconds: totalSec % 60,
+    };
+}
+
+function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+/** 列表视图：剩余天数（已过为负） */
+function daysRemaining(dateStr, isRecurring) {
+    const today = startOfDay(new Date());
+    const target = parseDate(dateStr);
+    let diff = Math.round((target - today) / 86400000);
+    if (diff >= 0) return diff;
+    if (isRecurring) {
+        const next = getNextOccurrence(dateStr, true, today);
+        return Math.max(0, Math.round((next - today) / 86400000));
+    }
+    return diff;
+}
+
+function fmtDateCN(dateStr) {
+    const d = parseDate(dateStr);
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+/* ═══════════════ 图标 ═══════════════ */
+const svg = (inner, size = 14) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const ICONS = {
+    bell: svg('<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>', 13),
+    bellOff: svg('<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>', 13),
+    pin: svg('<path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/>', 13),
+    pinOff: svg('<path d="M12 17v5M9 9.35V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1M5 16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V10"/><path d="m2 2 20 20"/>', 13),
+    pencil: svg('<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>', 13),
+    trash: svg('<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 13),
+    calendar: svg('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>', 15),
+    gift: svg('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/>', 15),
+    timer: svg('<path d="M10 2h4M12 14l3-3"/><circle cx="12" cy="14" r="8"/>', 11),
+    alertTri: svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4M12 17h.01"/>', 13),
+    alertCircle: svg('<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>', 15),
+    clock: svg('<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', 15),
+    sparkles: svg('<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>', 18),
+    check: svg('<path d="M20 6 9 17l-5-5"/>', 12),
+    party: svg('<path d="M5.8 11.3 2 22l10.7-3.79M4 3h.01M22 8h.01M15 2h.01M22 20h.01M9 10l6.5 6.5M9 10a5 5 0 0 0 13.5-3.5M2.5 9A5 5 0 0 0 9 10"/>', 18),
+};
+
+/** 生成指定尺寸的图标 */
+function icon(base, size) {
+    return base.replace(/width="\d+" height="\d+"/, `width="${size}" height="${size}"`);
+}
+
+function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ═══════════════ Toast ═══════════════ */
+function toast(msg, duration = 3000) {
+    const box = document.getElementById('toasts');
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, duration);
+}
+
+/* ═══════════════ 时钟视图 ═══════════════ */
+
+function countGrid(parts, small) {
+    return `<div class="count-grid">${[
+        [parts.days, '天'], [parts.hours, '时'], [parts.minutes, '分'], [parts.seconds, '秒'],
+    ].map(([v, u]) => `<div class="count-cell${small ? ' small' : ''}"><span class="num">${pad2(v)}</span><span class="unit">${u}</span></div>`).join('')}</div>`;
+}
+
+function renderClockView(now) {
+    const hh = pad2(now.getHours()), mm = pad2(now.getMinutes()), ss = pad2(now.getSeconds());
+    const blink = now.getSeconds() % 2 === 0;
+    const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${WEEKDAYS[now.getDay()]}`;
+
+    // 全量项
+    const all = [
+        ...store.customList.map((c) => ({
+            id: c.id, name: c.name, origDate: parseDate(c.date),
+            targetDate: getNextOccurrence(c.date, c.isRecurring, now),
+            isRecurring: c.isRecurring, showElapsed: c.showElapsed, type: 'custom',
+        })),
+        ...HOLIDAYS.filter((h) => store.selectedHolidayIds.includes(h.id)).map((h) => ({
+            id: h.id, name: h.name, origDate: parseDate(h.date),
+            targetDate: getNextOccurrence(h.date, true, now),
+            isRecurring: true, showElapsed: false, type: 'holiday',
+        })),
+    ];
+
+    const pinned = all.filter((i) => store.pinnedClockIds.includes(i.id));
+    const future = all.filter((i) => i.targetDate > now).sort((a, b) => a.targetDate - b.targetDate);
+    const autoNearest = future.find((i) => !store.pinnedClockIds.includes(i.id)) || null;
+    const autoDiff = autoNearest ? getTimeDiff(autoNearest.targetDate, now) : null;
+    const isUrgent = store.reminderEnabled && autoDiff && autoDiff.totalSec <= 259200;
+
+    let html = `<div class="clock-view view-anim">
+        <div>
+            <div class="big-clock">
+                <span class="hm">${hh}</span><span class="colon${blink ? '' : ' dim'}">:</span><span class="hm">${mm}</span><span class="colon${blink ? '' : ' dim'}">:</span><span class="sec">${ss}</span>
+            </div>
+            <div class="date-line">${icon(ICONS.calendar, 13)}<span>${dateStr}</span></div>
+        </div>`;
+
+    // 固定卡片
+    if (pinned.length) {
+        html += `<div class="pinned-section">
+            <div class="pinned-label">${icon(ICONS.pin, 11)} 已固定 (${pinned.length})</div>`;
+        for (const item of pinned) {
+            const diff = getTimeDiff(item.targetDate, now);
+            const elapsed = item.showElapsed ? elapsedParts(item.origDate, now) : null;
+            if (!diff && !elapsed) continue;
+            html += `<div class="card-box pinned">
+                <div class="card-head" style="margin-bottom:8px">
+                    ${ICONS.pin}
+                    <span class="name">${esc(item.name)}</span>
+                    ${item.isRecurring ? '<span class="recur-tag">每年</span>' : ''}
+                    <button class="unpin-btn" data-action="unpin" data-id="${item.id}" title="取消固定">${ICONS.pinOff}</button>
+                </div>
+                ${diff ? countGrid(diff, true) : ''}
+                ${elapsed ? `<div class="${diff ? 'elapsed-block' : ''}">
+                    ${diff ? '<div class="elapsed-title">' + ICONS.timer + ' 累计时间</div>' : ''}
+                    ${countGrid(elapsed, true)}
+                </div>` : ''}
+            </div>`;
+        }
+        html += `</div>`;
+    }
+
+    // 自动最近纪念日
+    if (autoNearest && autoDiff) {
+        html += `<div class="card-box${isUrgent ? ' urgent' : ''}">
+            <div class="card-head">
+                ${isUrgent ? ICONS.alertCircle : ICONS.clock}
+                <span class="label">${isUrgent ? '节日提醒' : pinned.length ? '其他最近' : '最近纪念日'}</span>
+                <span class="badge" style="margin-left:auto">${autoNearest.type === 'holiday' ? '公休日' : '自定义'}</span>
+            </div>
+            <div class="card-head">
+                <span class="name" style="font-size:15px">${esc(autoNearest.name)}</span>
+                ${autoNearest.isRecurring ? '<span class="recur-tag">每年重复</span>' : ''}
+            </div>
+            ${countGrid(autoDiff)}
+            ${(() => {
+                const ep = autoNearest.showElapsed ? elapsedParts(autoNearest.origDate, now) : null;
+                return ep ? `<div class="elapsed-block"><div class="elapsed-title">${ICONS.timer} 累计时间</div>${countGrid(ep, true)}</div>` : '';
+            })()}
+            <div class="card-foot">${autoNearest.targetDate.getMonth() + 1}月${autoNearest.targetDate.getDate()}日</div>
+        </div>`;
+    } else if (!pinned.length) {
+        html += `<div class="empty-box">
+            ${svg('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>', 30)}
+            ${all.length
+                ? `<p>暂无固定的倒计时</p><p class="sub">在列表中点击图钉固定到时钟页</p>`
+                : `<p>暂无纪念日</p><p class="sub">点击上方 + 添加</p>`}
+        </div>`;
+    }
+
+    html += `</div>`;
+    return html;
+}
+
+/* ═══════════════ 列表视图 ═══════════════ */
+
+function formatDaysText(days) {
+    if (days === 0) return '就是今天！';
+    if (days > 0) return `还有 ${days} 天`;
+    return `已过 ${Math.abs(days)} 天`;
+}
+function daysBadgeClass(days) {
+    if (days === 0) return 'badge warn';
+    if (days > 0 && days <= 3) return 'badge solid';
+    if (days < 0) return 'badge gray';
+    return 'badge';
+}
+
+function renderListView(now) {
+    const items = [];
+    for (const c of store.customList) {
+        items.push({
+            id: c.id, name: c.name, date: c.date, isRecurring: c.isRecurring,
+            showElapsed: c.showElapsed, type: 'custom',
+            daysRemaining: daysRemaining(c.date, c.isRecurring),
+        });
+    }
+    for (const hid of store.selectedHolidayIds) {
+        const h = HOLIDAYS.find((x) => x.id === hid);
+        if (!h) continue;
+        items.push({
+            id: h.id, name: h.name, date: h.date, isRecurring: true,
+            showElapsed: false, type: 'holiday',
+            daysRemaining: daysRemaining(h.date, true),
+        });
+    }
+    items.sort((a, b) => {
+        if (a.daysRemaining < 0 && b.daysRemaining >= 0) return 1;
+        if (a.daysRemaining >= 0 && b.daysRemaining < 0) return -1;
+        return a.daysRemaining - b.daysRemaining;
+    });
+
+    if (!items.length) {
+        return `<div class="list-view view-anim"><div class="empty-box" style="max-width:none;margin:28px 4px">
+            ${svg('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>', 36)}
+            <p>暂无纪念日</p><p class="sub">点击右上角 + 添加纪念日</p>
+        </div></div>`;
+    }
+
+    let html = `<div class="list-view view-anim">`;
+    items.forEach((item, i) => {
+        const nearby = store.reminderEnabled && item.daysRemaining >= 0 && item.daysRemaining <= 3;
+        const isPinned = store.pinnedClockIds.includes(item.id);
+        const ep = item.showElapsed ? elapsedParts(parseDate(item.date), now) : null;
+        html += `<div class="list-item${nearby ? ' nearby' : ''}" style="animation-delay:${i * 0.03}s">
+            <div class="item-icon${item.type === 'holiday' ? ' holiday' : ''}">${item.type === 'holiday' ? ICONS.gift : ICONS.calendar}</div>
+            <div class="item-info">
+                <div class="item-name-row">
+                    <span class="item-name">${esc(item.name)}</span>
+                    ${nearby ? `<span style="color:var(--primary);animation:pulse 1.5s infinite">${ICONS.alertTri}</span>` : ''}
+                    ${item.isRecurring ? '<span class="badge gray" style="padding:1px 5px">每年</span>' : ''}
+                </div>
+                <div class="item-date">${fmtDateCN(item.date)}</div>
+                ${ep ? `<div class="item-elapsed">${ICONS.timer} 已 ${ep.days} 天 ${ep.hours} 时 ${ep.minutes} 分 ${ep.seconds} 秒</div>` : ''}
+            </div>
+            <span class="${daysBadgeClass(item.daysRemaining)}">${formatDaysText(item.daysRemaining)}</span>
+            <div class="item-actions${isPinned ? ' always' : ''}">
+                ${isPinned
+                    ? `<button class="icon-btn pinned" data-action="unpin" data-id="${item.id}" title="取消固定">${ICONS.pinOff}</button>`
+                    : `<button class="icon-btn" data-action="pin" data-id="${item.id}" title="固定到时钟页">${ICONS.pin}</button>`}
+                ${item.type === 'custom' ? `<button class="icon-btn" data-action="edit" data-id="${item.id}" title="编辑">${ICONS.pencil}</button>` : ''}
+                <button class="icon-btn danger" data-action="delete" data-id="${item.id}" data-type="${item.type}" data-name="${esc(item.name)}" title="删除">${ICONS.trash}</button>
+            </div>
+        </div>`;
+    });
+    html += `<div class="list-foot"><span>共 ${items.length} 项</span><span>${icon(ICONS.clock, 11)} 实时更新</span></div></div>`;
+    return html;
+}
+
+/* ═══════════════ 渲染调度 ═══════════════ */
+
+let lastViewKey = '';
+let lastDataFingerprint = '';
+function dataFingerprint() {
+    return JSON.stringify({
+        v: store.viewMode,
+        n: store.customList.length,
+        h: store.selectedHolidayIds.length,
+        p: store.pinnedClockIds.join(','),
+        r: store.reminderEnabled,
+    });
+}
+function render(forceAnim = false) {
+    const now = new Date();
+    const key = store.viewMode;
+    const fp = dataFingerprint();
+    const content = document.getElementById('content');
+    // 仅在视图切换或数据变化时播放入场动画；每秒 tick 静默更新，避免画面抖动与滚动条闪烁
+    content.classList.toggle('no-anim', !forceAnim && key === lastViewKey && fp === lastDataFingerprint);
+    lastViewKey = key;
+    lastDataFingerprint = fp;
+    content.innerHTML = store.viewMode === 'clock' ? renderClockView(now) : renderListView(now);
+
+    // 控制栏状态
+    document.getElementById('seg-clock').classList.toggle('active', store.viewMode === 'clock');
+    document.getElementById('seg-list').classList.toggle('active', store.viewMode === 'list');
+    const bell = document.getElementById('btn-reminder');
+    bell.classList.toggle('on', store.reminderEnabled);
+    bell.innerHTML = (store.reminderEnabled ? ICONS.bell : ICONS.bellOff) + ' 提醒';
+    document.getElementById('status-dot').classList.toggle('on', store.reminderEnabled);
+    document.getElementById('status-text').textContent = store.reminderEnabled ? '提醒已开启' : '提醒已关闭';
+}
+
+/* ═══════════════ 弹窗（添加/编辑） ═══════════════ */
+
+let editingId = null;
+let dlgDate = '';           // YYYY-MM-DD
+let checkedHolidayIds = new Set();
+
+function openDialog(editItem) {
+    editingId = editItem ? editItem.id : null;
+    document.getElementById('dlg-title').innerHTML =
+        (editItem ? icon(ICONS.pencil, 18) : ICONS.sparkles) + (editItem ? ' 编辑纪念日' : ' 添加纪念日');
+    document.getElementById('dlg-tabs').style.display = editItem ? 'none' : 'grid';
+    switchTab('custom');
+    // 表单预填
+    document.getElementById('f-name').value = editItem ? editItem.name : '';
+    setDateInput(editItem ? editItem.date : '');
+    document.getElementById('f-recurring').classList.toggle('on', editItem ? editItem.isRecurring : false);
+    document.getElementById('f-elapsed').classList.toggle('on', editItem ? !!editItem.showElapsed : false);
+    document.getElementById('f-submit').textContent = editItem ? '保存修改' : '添加纪念日';
+    checkedHolidayIds = new Set();
+    renderHolidayTab();
+    document.getElementById('dlg-overlay').classList.add('open');
+}
+function closeDialog() {
+    document.getElementById('dlg-overlay').classList.remove('open');
+    editingId = null;
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('#dlg-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    document.getElementById('tab-custom').style.display = tab === 'custom' ? 'block' : 'none';
+    document.getElementById('tab-holidays').style.display = tab === 'holidays' ? 'block' : 'none';
+}
+
+/* 日期掩码输入 YYYY/MM/DD */
+function formatDigits(digits) {
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 4)}/${digits.slice(4)}`;
+    return `${digits.slice(0, 4)}/${digits.slice(4, 6)}/${digits.slice(6, 8)}`;
+}
+function setDateInput(ymd) {
+    dlgDate = ymd || '';
+    const el = document.getElementById('f-date');
+    el.value = ymd ? formatDigits(ymd.replace(/-/g, '')) : '';
+}
+function setupDateInput() {
+    const el = document.getElementById('f-date');
+    el.addEventListener('input', () => {
+        const digits = el.value.replace(/\D/g, '').slice(0, 8);
+        el.value = formatDigits(digits);
+        el.setSelectionRange(el.value.length, el.value.length);
+        dlgDate = digits.length === 8 ? `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}` : '';
+    });
+    el.addEventListener('keydown', (e) => {
+        const pos = el.selectionStart || 0;
+        if (e.key === 'Backspace' && pos > 0 && el.value[pos - 1] === '/') {
+            e.preventDefault();
+            const nv = el.value.slice(0, pos - 2) + el.value.slice(pos);
+            el.value = formatDigits(nv.replace(/\D/g, ''));
+            el.setSelectionRange(pos - 2, pos - 2);
+            dlgDate = '';
+        }
+    });
+}
+
+function submitCustom() {
+    const name = document.getElementById('f-name').value.trim();
+    if (!name) return toast('请输入纪念日名称');
+    if (!dlgDate) return toast('请输入完整日期');
+    const isRecurring = document.getElementById('f-recurring').classList.contains('on');
+    const showElapsed = document.getElementById('f-elapsed').classList.contains('on');
+    if (editingId) {
+        const item = store.customList.find((c) => c.id === editingId);
+        if (item) Object.assign(item, { name, date: dlgDate, isRecurring, showElapsed });
+        toast('纪念日已更新');
+    } else {
+        store.customList.push({ id: uuid(), name, date: dlgDate, isRecurring, showElapsed, createdAt: Date.now() });
+        toast('纪念日已添加');
+    }
+    persist(); render(); closeDialog();
+}
+
+/* 公休日 Tab */
+function renderHolidayTab() {
+    const body = document.getElementById('holiday-body');
+    const unselected = HOLIDAYS.filter((h) => !store.selectedHolidayIds.includes(h.id));
+    if (!unselected.length) {
+        body.innerHTML = `<div style="text-align:center;padding:28px 0;color:var(--muted-foreground)">
+            ${icon(ICONS.party, 36)}<p style="margin-top:10px;font-size:13px">所有法定公休日已添加</p></div>`;
+        return;
+    }
+    const allChecked = checkedHolidayIds.size === unselected.length;
+    body.innerHTML = `
+        <div class="select-all-row">
+            <div class="left" data-action="toggle-all">
+                <div class="checkbox${allChecked ? ' on' : ''}">${ICONS.check}</div>
+                全选<span class="cnt">（${unselected.length} 个待添加）</span>
+            </div>
+            <span class="cnt">已选 ${checkedHolidayIds.size} 个</span>
+        </div>
+        <div class="holiday-list">
+            ${unselected.map((h) => `<div class="holiday-row" data-action="toggle-holiday" data-id="${h.id}">
+                <div class="checkbox${checkedHolidayIds.has(h.id) ? ' on' : ''}">${ICONS.check}</div>
+                <div><div class="hname">${h.name}</div><div class="hdesc">${h.date} · ${h.description}</div></div>
+            </div>`).join('')}
+        </div>
+        <button class="w-full-btn" data-action="confirm-holidays" ${checkedHolidayIds.size === 0 ? 'disabled' : ''}>
+            确认添加${checkedHolidayIds.size > 0 ? ` (${checkedHolidayIds.size})` : ''}
+        </button>`;
+}
+
+/* ═══════════════ 删除确认 ═══════════════ */
+let deleteTarget = null;
+function openConfirm(id, type, name) {
+    deleteTarget = { id, type };
+    document.getElementById('confirm-desc').textContent = `确定删除「${name}」吗？此操作无法撤销。`;
+    document.getElementById('confirm-overlay').classList.add('open');
+}
+function closeConfirm() {
+    deleteTarget = null;
+    document.getElementById('confirm-overlay').classList.remove('open');
+}
+
+/* ═══════════════ 事件绑定 ═══════════════ */
+
+function setupEvents() {
+    // 窗口控制
+    document.getElementById('btn-hide').onclick = () => window.epodeck && window.epodeck.hideWindow();
+    document.getElementById('btn-close').onclick = () => window.epodeck ? window.epodeck.quitApp() : window.close();
+
+    // 视图切换
+    document.getElementById('seg-clock').onclick = () => { store.viewMode = 'clock'; localStorage.setItem('memorial_view_mode', 'clock'); render(); };
+    document.getElementById('seg-list').onclick = () => { store.viewMode = 'list'; localStorage.setItem('memorial_view_mode', 'list'); render(); };
+
+    // 提醒开关
+    document.getElementById('btn-reminder').onclick = () => {
+        store.reminderEnabled = !store.reminderEnabled;
+        if (store.reminderEnabled) toast('节日提醒已开启，临近节日时将高亮提示');
+        persist(); render();
+    };
+
+    // 添加
+    document.getElementById('btn-add').onclick = () => openDialog(null);
+
+    // 内容区事件委托
+    document.getElementById('content').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const { action, id, type, name } = btn.dataset;
+        if (action === 'pin' || action === 'unpin') {
+            const i = store.pinnedClockIds.indexOf(id);
+            i >= 0 ? store.pinnedClockIds.splice(i, 1) : store.pinnedClockIds.push(id);
+            persist(); render();
+        } else if (action === 'edit') {
+            const item = store.customList.find((c) => c.id === id);
+            if (item) openDialog(item);
+        } else if (action === 'delete') {
+            openConfirm(id, type, name);
+        }
+    });
+
+    // 弹窗
+    document.getElementById('dlg-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'dlg-overlay') closeDialog();
+    });
+    document.getElementById('dlg-tabs').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-tab]');
+        if (b) switchTab(b.dataset.tab);
+    });
+    document.getElementById('f-recurring').onclick = function () { this.classList.toggle('on'); };
+    document.getElementById('f-elapsed').onclick = function () { this.classList.toggle('on'); };
+    document.getElementById('f-submit').onclick = submitCustom;
+    setupDateInput();
+
+    document.getElementById('tab-holidays').addEventListener('click', (e) => {
+        const el = e.target.closest('[data-action]');
+        if (!el) return;
+        const { action, id } = el.dataset;
+        if (action === 'toggle-all') {
+            const unselected = HOLIDAYS.filter((h) => !store.selectedHolidayIds.includes(h.id));
+            checkedHolidayIds = checkedHolidayIds.size === unselected.length ? new Set() : new Set(unselected.map((h) => h.id));
+            renderHolidayTab();
+        } else if (action === 'toggle-holiday') {
+            checkedHolidayIds.has(id) ? checkedHolidayIds.delete(id) : checkedHolidayIds.add(id);
+            renderHolidayTab();
+        } else if (action === 'confirm-holidays') {
+            if (!checkedHolidayIds.size) return toast('请至少选择一个公休日');
+            store.selectedHolidayIds = Array.from(new Set([...store.selectedHolidayIds, ...checkedHolidayIds]));
+            toast(`已添加 ${checkedHolidayIds.size} 个公休日`);
+            checkedHolidayIds = new Set();
+            persist(); render(); closeDialog();
+        }
+    });
+
+    // 删除确认
+    document.getElementById('confirm-cancel').onclick = closeConfirm;
+    document.getElementById('confirm-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'confirm-overlay') closeConfirm();
+    });
+    document.getElementById('confirm-ok').onclick = () => {
+        if (!deleteTarget) return closeConfirm();
+        if (deleteTarget.type === 'custom') {
+            store.customList = store.customList.filter((c) => c.id !== deleteTarget.id);
+        } else {
+            store.selectedHolidayIds = store.selectedHolidayIds.filter((h) => h !== deleteTarget.id);
+        }
+        // 同步清理固定项
+        store.pinnedClockIds = store.pinnedClockIds.filter((p) => p !== deleteTarget.id);
+        persist(); render(); closeConfirm();
+    };
+
+    // Esc 关闭弹窗
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { closeDialog(); closeConfirm(); }
+    });
+
+    // 页面隐藏/关闭前保存
+    document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
+    window.addEventListener('beforeunload', () => persist());
+}
+
+/* ═══════════════ 提醒检查 ═══════════════ */
+function checkReminder() {
+    if (!store.reminderEnabled) return;
+    const now = new Date();
+    const candidates = [
+        ...store.customList.map((c) => ({ name: c.name, target: getNextOccurrence(c.date, c.isRecurring, now) })),
+        ...HOLIDAYS.filter((h) => store.selectedHolidayIds.includes(h.id))
+            .map((h) => ({ name: h.name, target: getNextOccurrence(h.date, true, now) })),
+    ].filter((c) => c.target > now).sort((a, b) => a.target - b.target);
+    const nearest = candidates[0];
+    if (!nearest) return;
+    const diffDays = Math.ceil((nearest.target - now) / 86400000);
+    if (diffDays >= 0 && diffDays <= 3) {
+        toast(`🎉 「${nearest.name}」${diffDays === 0 ? '就是今天！' : `还有 ${diffDays} 天`}`, 5000);
+    }
+}
+
+/* ═══════════════ 启动 ═══════════════ */
+(async function main() {
+    await initData();
+    setupEvents();
+    render();
+    setInterval(render, 1000);
+    setTimeout(checkReminder, 1200);
+})();
+</script>
+</body>
+</html>
